@@ -1,0 +1,22 @@
+{
+  "metadata": {
+    "upload_id": "20250117_102845",
+    "upload_timestamp": "2025-01-17T10:28:45.570709",
+    "version_status": "Draft",
+    "processed_rows": 0,
+    "total_estimate": 0,
+    "processed_class_codes": [],
+    "total_line_items": 0,
+    "has_actuals": false,
+    "validation": {
+      "is_valid": false,
+      "missing_days": false,
+      "has_actuals": false,
+      "messages": [
+        "No budget classes found"
+      ],
+      "class_summaries": {}
+    }
+  },
+  "rows": []
+}

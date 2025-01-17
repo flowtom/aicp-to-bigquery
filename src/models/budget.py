@@ -18,6 +18,8 @@ class BudgetLineItem:
     estimate_rate: Optional[float]
     actual_days: Optional[float]
     actual_rate: Optional[float]
+    estimate_ot_rate: Optional[float] = None
+    estimate_ot_hours: Optional[float] = None
     validation: ValidationResult = field(default_factory=ValidationResult)
 
     def __post_init__(self):
@@ -34,15 +36,28 @@ class BudgetLineItem:
         
         if self.actual_rate and not self.actual_days:
             self.validation.messages.append("Has actual rate but missing days")
+            
+        # OT validation
+        if self.estimate_ot_rate is not None:
+            if self.estimate_ot_rate > 0 and not self.estimate_ot_hours:
+                self.validation.messages.append("Has OT rate but missing OT hours")
+            elif self.estimate_ot_hours and not self.estimate_ot_rate:
+                self.validation.messages.append("Has OT hours but missing OT rate")
 
     @property
     def estimate_total(self) -> float:
         """Calculate estimate total following AICP rules"""
-        if not self.estimate_rate:
-            return 0.0
-        if not self.estimate_days:
-            return 0.0
-        return self.estimate_days * self.estimate_rate
+        total = 0.0
+        
+        # Regular hours
+        if self.estimate_rate and self.estimate_days:
+            total += self.estimate_days * self.estimate_rate
+        
+        # OT hours if applicable
+        if self.estimate_ot_rate and self.estimate_ot_hours:
+            total += self.estimate_ot_rate * self.estimate_ot_hours
+            
+        return total
 
     @property
     def actual_total(self) -> float:
@@ -167,7 +182,14 @@ class Budget:
             'items_with_rates': sum(1 for item in budget_class.line_items if item.estimate_rate is not None),
             'items_with_days': sum(1 for item in budget_class.line_items if item.estimate_days is not None),
             'items_complete': sum(1 for item in budget_class.line_items if item.estimate_total > 0),
-            'has_actuals': budget_class.has_actuals
+            'has_actuals': budget_class.has_actuals,
+            # Add totals to summary
+            'estimate_subtotal': budget_class.estimate_subtotal,
+            'estimate_pnw': budget_class.estimate_pnw,
+            'estimate_total': budget_class.estimate_total,
+            'actual_subtotal': budget_class.actual_subtotal,
+            'actual_pnw': budget_class.actual_pnw,
+            'actual_total': budget_class.actual_total
         }
         
         # Validate class structure
@@ -188,6 +210,20 @@ class Budget:
                 summary['messages'].append(
                     f"{len(incomplete_items)} items have rates but missing days"
                 )
+            
+            # Additional validation for Class B OT fields
+            if budget_class.code == 'B':
+                ot_issues = []
+                for item in budget_class.line_items:
+                    if item.estimate_ot_rate and not item.estimate_ot_hours:
+                        ot_issues.append("rate without hours")
+                    elif item.estimate_ot_hours and not item.estimate_ot_rate:
+                        ot_issues.append("hours without rate")
+                
+                if ot_issues:
+                    summary['messages'].append(
+                        f"{len(ot_issues)} items have OT {', '.join(set(ot_issues))}"
+                    )
         
         return summary
 
@@ -236,7 +272,7 @@ class Budget:
         rows = []
         for budget_class in self.classes.values():
             for line_item in budget_class.line_items:
-                rows.append({
+                row = {
                     'upload_id': self.upload_id,
                     'budget_name': self.budget_name,
                     'upload_timestamp': self.upload_timestamp.isoformat(),
@@ -260,5 +296,15 @@ class Budget:
                     # Validation
                     'validation_status': 'valid' if line_item.validation.is_valid else 'invalid',
                     'validation_messages': line_item.validation.messages
-                })
+                }
+                
+                # Add OT fields if present (for Class B)
+                if budget_class.code == 'B':
+                    row.update({
+                        'estimate_ot_rate': line_item.estimate_ot_rate,
+                        'estimate_ot_hours': line_item.estimate_ot_hours,
+                        'estimate_ot_total': (line_item.estimate_ot_rate or 0) * (line_item.estimate_ot_hours or 0)
+                    })
+                
+                rows.append(row)
         return rows 
