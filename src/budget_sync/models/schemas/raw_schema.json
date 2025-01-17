@@ -1,0 +1,17 @@
+[
+  {"name": "upload_id", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "user_email", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "budget_name", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "upload_timestamp", "type": "TIMESTAMP", "mode": "REQUIRED"},
+  {"name": "class_code", "type": "STRING", "mode": "REQUIRED", "description": "e.g., A, B, C"},
+  {"name": "class_name", "type": "STRING", "mode": "REQUIRED", "description": "e.g., PREPRODUCTION & WRAP CREW"},
+  {"name": "line_item_number", "type": "INTEGER", "mode": "REQUIRED"},
+  {"name": "line_item_description", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "estimate_days", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "estimate_rate", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "estimate_total", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "actual_days", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "actual_rate", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "actual_total", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "raw_row_data", "type": "STRING", "mode": "NULLABLE"}
+] 

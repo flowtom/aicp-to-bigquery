@@ -1,0 +1,22 @@
+[
+  {"name": "upload_id", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "budget_name", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "upload_timestamp", "type": "TIMESTAMP", "mode": "REQUIRED"},
+  {"name": "version_hash", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "class_code", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "class_name", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "line_item_number", "type": "INTEGER", "mode": "REQUIRED"},
+  {"name": "line_item_description", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "estimate_days", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "estimate_rate", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "estimate_total", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "calculated_estimate_total", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "estimate_variance", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "actual_days", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "actual_rate", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "actual_total", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "calculated_actual_total", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "actual_variance", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "class_total_estimate", "type": "FLOAT", "mode": "NULLABLE"},
+  {"name": "class_total_actual", "type": "FLOAT", "mode": "NULLABLE"}
+] 
