@@ -210,13 +210,13 @@ class BudgetProcessor:
                 'actual': 'AR36'
             },
             'pw_cells': {
-                'label': None,  # No P&W for Class G
-                'estimate': None,
-                'actual': None
+                'label': 'AN37',  # P&W label
+                'estimate': 'AO37',  # Estimate P&W
+                'actual': 'AR37'   # Actual P&W
             },
             'total_cells': {
-                'estimate': 'AO36',  # Same as subtotal since no P&W
-                'actual': 'AR36'
+                'estimate': 'AO38',  # Total after P&W
+                'actual': 'AR38'    # Total after P&W
             },
             'required_fields': ['line_number', 'description']
         },
@@ -246,6 +246,66 @@ class BudgetProcessor:
             'total_cells': {
                 'estimate': 'AO54',  # Same as subtotal since no P&W
                 'actual': 'AR54'
+            },
+            'required_fields': ['line_number', 'description']
+        },
+        'I': {
+            'class_code_cell': 'AS1',
+            'class_name_cell': 'AT1',  # Combined in same cell as code
+            'line_items_range': {'start': 'AS3', 'end': 'AZ20'},
+            'columns': {
+                'estimate': {
+                    'number': 'AU',
+                    'days': 'AV',
+                    'rate': 'AW',
+                    'total': 'AX'
+                },
+                'actual': {
+                    'total': 'AZ'
+                }
+            },
+            'subtotal_cells': {
+                'estimate': 'AX21',
+                'actual': 'AZ21'
+            },
+            'pw_cells': {
+                'label': None,  # No P&W for Class I
+                'estimate': None,
+                'actual': None
+            },
+            'total_cells': {
+                'estimate': 'AX21',  # Same as subtotal since no P&W
+                'actual': 'AZ21'
+            },
+            'required_fields': ['line_number', 'description']
+        },
+        'J': {
+            'class_code_cell': 'AS23',
+            'class_name_cell': 'AT23',  # Combined in same cell as code
+            'line_items_range': {'start': 'AS25', 'end': 'AZ30'},
+            'columns': {
+                'estimate': {
+                    'number': 'AU',
+                    'days': 'AV',
+                    'rate': 'AW',
+                    'total': 'AX'
+                },
+                'actual': {
+                    'total': 'AZ'
+                }
+            },
+            'subtotal_cells': {
+                'estimate': 'AX31',
+                'actual': 'AZ31'
+            },
+            'pw_cells': {
+                'label': None,  # No P&W for Class J
+                'estimate': None,
+                'actual': None
+            },
+            'total_cells': {
+                'estimate': 'AX31',  # Same as subtotal since no P&W
+                'actual': 'AZ31'
             },
             'required_fields': ['line_number', 'description']
         }
@@ -441,6 +501,14 @@ class BudgetProcessor:
                     'estimate_total': row[4] if len(row) > 4 else None,
                     'actual_total': row[5] if len(row) > 5 else None
                 })
+            elif class_code == 'I':  # Class I has number, days, rate, total
+                line_item.update({
+                    'estimate_number': row[2] if len(row) > 2 else None,
+                    'estimate_days': row[3] if len(row) > 3 else None,
+                    'estimate_rate': row[4] if len(row) > 4 else None,
+                    'estimate_total': row[5] if len(row) > 5 else None,
+                    'actual_total': row[6] if len(row) > 6 else None
+                })
             else:  # Classes C, D, E
                 line_item.update({
                     'estimate_number': row[2] if len(row) > 2 else None,
@@ -453,10 +521,10 @@ class BudgetProcessor:
             # Add class totals
             line_item.update({
                 'class_estimate_subtotal': class_totals['class_estimate_subtotal'],
-                'class_estimate_pnw': class_totals.get('class_estimate_pnw', None),  # May be None for Class C-H
+                'class_estimate_pnw': class_totals.get('class_estimate_pnw', None),  # May be None for Class C-I
                 'class_estimate_total': class_totals['class_estimate_total'],
                 'class_actual_subtotal': class_totals['class_actual_subtotal'],
-                'class_actual_pnw': class_totals.get('class_actual_pnw', None),  # May be None for Class C-H
+                'class_actual_pnw': class_totals.get('class_actual_pnw', None),  # May be None for Class C-I
                 'class_actual_total': class_totals['class_actual_total']
             })
             
