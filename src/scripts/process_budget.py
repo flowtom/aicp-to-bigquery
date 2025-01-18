@@ -76,12 +76,23 @@ def main():
             logger.warning("No rows were processed")
             return
             
-        # Save to file
-        output_path = os.path.join(
-            'output',
-            f"processed_budget_{metadata['upload_id']}.json"
-        )
-        save_processed_data(processed_rows, metadata, output_path)
+        # Save results to file
+        output_dir = Path('output')
+        output_dir.mkdir(exist_ok=True)
+        
+        output_file = output_dir / \
+            f"processed_budget_{metadata['upload_info']['id']}.json"
+        
+        with open(output_file, 'w') as f:
+            json.dump({
+                'metadata': metadata,
+                'rows': processed_rows
+            }, f, indent=2)
+        
+        logger.info(f"\nFull results saved to: {output_file}")
+        logger.info("\nFirst few processed rows:")
+        for row in processed_rows[:3]:
+            logger.info(json.dumps(row, indent=2))
         
     except Exception as e:
         logger.error(f"Error processing budget: {e}")

@@ -71,6 +71,66 @@ class BudgetProcessor:
                 'actual': 'AC55'     # =($AC$53+$AC$54)
             },
             'required_fields': ['line_number', 'description']
+        },
+        'C': {
+            'class_code_cell': 'AD1',
+            'class_name_cell': 'AD1',  # Combined in same cell as code
+            'line_items_range': {'start': 'AD3', 'end': 'AJ15'},
+            'columns': {
+                'estimate': {
+                    'number': 'AF',
+                    'days': 'AG',
+                    'rate': 'AH',
+                    'total': 'AI'
+                },
+                'actual': {
+                    'total': 'AJ'
+                }
+            },
+            'subtotal_cells': {
+                'estimate': 'AI16',
+                'actual': 'AJ16'
+            },
+            'pw_cells': {
+                'label': None,  # No P&W for Class C
+                'estimate': None,
+                'actual': None
+            },
+            'total_cells': {
+                'estimate': 'AI16',  # Same as subtotal since no P&W
+                'actual': 'AJ16'
+            },
+            'required_fields': ['line_number', 'description']
+        },
+        'D': {
+            'class_code_cell': 'AD18',
+            'class_name_cell': 'AD18',  # Combined in same cell as code
+            'line_items_range': {'start': 'AD20', 'end': 'AJ44'},
+            'columns': {
+                'estimate': {
+                    'number': 'AF',
+                    'days': 'AG',
+                    'rate': 'AH',
+                    'total': 'AI'
+                },
+                'actual': {
+                    'total': 'AJ'
+                }
+            },
+            'subtotal_cells': {
+                'estimate': 'AI45',
+                'actual': 'AJ45'
+            },
+            'pw_cells': {
+                'label': None,  # No P&W for Class D
+                'estimate': None,
+                'actual': None
+            },
+            'total_cells': {
+                'estimate': 'AI45',  # Same as subtotal since no P&W
+                'actual': 'AJ45'
+            },
+            'required_fields': ['line_number', 'description']
         }
     }
     
@@ -158,15 +218,19 @@ class BudgetProcessor:
             if value == "$0.00":
                 logger.debug(f"Empty or zero {key} subtotal value in cell {cell}")
         
-        # Get P&W values
-        for key in ['estimate', 'actual']:
-            cell = mapping['pw_cells'][key]
-            cell_range = f"'{sheet_title}'!{cell}"
-            result = self._get_range_values(spreadsheet_id, cell_range)
-            value = result[0][0] if result and result[0] else "$0.00"
-            values[f'class_{key}_pnw'] = value
-            if value == "$0.00":
-                logger.debug(f"Empty or zero {key} P&W value in cell {cell}")
+        # Get P&W values if they exist
+        if mapping['pw_cells'].get('estimate') is not None:
+            for key in ['estimate', 'actual']:
+                cell = mapping['pw_cells'][key]
+                cell_range = f"'{sheet_title}'!{cell}"
+                result = self._get_range_values(spreadsheet_id, cell_range)
+                value = result[0][0] if result and result[0] else "$0.00"
+                values[f'class_{key}_pnw'] = value
+                if value == "$0.00":
+                    logger.debug(f"Empty or zero {key} P&W value in cell {cell}")
+        else:
+            values['class_estimate_pnw'] = None
+            values['class_actual_pnw'] = None
         
         # Get total values
         for key in ['estimate', 'actual']:
@@ -213,6 +277,10 @@ class BudgetProcessor:
     def _process_line_item(self, row: List[Any], class_code: str, class_name: str, class_totals: Dict, row_number: int) -> Optional[Dict]:
         """Process a single line item with class totals."""
         try:
+            # Clean class name - remove class code prefix if present
+            if class_name and ':' in class_name:
+                class_name = class_name.split(':', 1)[1].strip()
+
             # Create base line item
             line_item = {
                 'class_code': class_code,
@@ -231,7 +299,7 @@ class BudgetProcessor:
                     'actual_rate': row[6] if len(row) > 6 else None,
                     'actual_total': row[7] if len(row) > 7 else None
                 })
-            else:  # Class B
+            elif class_code == 'B':
                 line_item.update({
                     'estimate_days': row[2] if len(row) > 2 else None,
                     'estimate_rate': row[3] if len(row) > 3 else None,
@@ -242,14 +310,22 @@ class BudgetProcessor:
                     'actual_rate': row[8] if len(row) > 8 else None,
                     'actual_total': row[9] if len(row) > 9 else None
                 })
+            else:  # Class C
+                line_item.update({
+                    'estimate_number': row[2] if len(row) > 2 else None,
+                    'estimate_days': row[3] if len(row) > 3 else None,
+                    'estimate_rate': row[4] if len(row) > 4 else None,
+                    'estimate_total': row[5] if len(row) > 5 else None,
+                    'actual_total': row[6] if len(row) > 6 else None
+                })
             
             # Add class totals
             line_item.update({
                 'class_estimate_subtotal': class_totals['class_estimate_subtotal'],
-                'class_estimate_pnw': class_totals['class_estimate_pnw'],
+                'class_estimate_pnw': class_totals.get('class_estimate_pnw', None),  # May be None for Class C
                 'class_estimate_total': class_totals['class_estimate_total'],
                 'class_actual_subtotal': class_totals['class_actual_subtotal'],
-                'class_actual_pnw': class_totals['class_actual_pnw'],
+                'class_actual_pnw': class_totals.get('class_actual_pnw', None),  # May be None for Class C
                 'class_actual_total': class_totals['class_actual_total']
             })
             
@@ -356,21 +432,35 @@ class BudgetProcessor:
                     
             # Create metadata
             metadata = {
-                'upload_id': self._generate_upload_id(sheet_info['spreadsheet_title'], sheet_title),
-                'upload_timestamp': datetime.now().isoformat(),
-                'sheet_title': sheet_title,
-                'sheet_gid': target_gid,
-                'processed_rows': len(processed_rows),
-                'processed_class_codes': list(set(row['class_code'] for row in processed_rows)),
-                'validation_issues': len(validation_issues),
-                'validation_messages': validation_issues if validation_issues else None
+                'project_info': {
+                    'name': sheet_info['spreadsheet_title'],
+                    'sheet': sheet_title,
+                },
+                'summary': {
+                    'total_rows': len(processed_rows),
+                    'processed_classes': {
+                        class_code: {
+                            'estimate_total': next((row['class_estimate_total'] for row in processed_rows if row['class_code'] == class_code), '$0.00'),
+                            'actual_total': next((row['class_actual_total'] for row in processed_rows if row['class_code'] == class_code), '$0.00'),
+                            'row_count': sum(1 for row in processed_rows if row['class_code'] == class_code)
+                        }
+                        for class_code in set(row['class_code'] for row in processed_rows)
+                    },
+                    'validation_count': len(validation_issues)
+                },
+                'upload_info': {
+                    'id': self._generate_upload_id(sheet_info['spreadsheet_title'], sheet_title),
+                    'timestamp': datetime.now().isoformat(),
+                    'sheet_gid': target_gid,
+                    'spreadsheet_id': spreadsheet_id
+                }
             }
             
             # Log processing summary
             logger.info(f"\nProcessing Summary:")
-            logger.info(f"- Total rows processed: {len(processed_rows)}")
-            logger.info(f"- Classes processed: {', '.join(metadata['processed_class_codes'])}")
-            logger.info(f"- Validation issues: {len(validation_issues)}")
+            logger.info(f"- Total rows processed: {metadata['summary']['total_rows']}")
+            logger.info(f"- Classes processed: {', '.join(metadata['summary']['processed_classes'].keys())}")
+            logger.info(f"- Validation issues: {metadata['summary']['validation_count']}")
             
             return processed_rows, metadata
             
