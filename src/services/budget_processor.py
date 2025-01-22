@@ -8,6 +8,7 @@ from googleapiclient.discovery import build
 from pathlib import Path
 import json
 from typing import Dict, List, Any, Optional
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -308,6 +309,219 @@ class BudgetProcessor:
                 'actual': 'AZ31'
             },
             'required_fields': ['line_number', 'description']
+        },
+        'K': {
+            'class_code_cell': 'AS33',
+            'class_name_cell': 'AT33',  # Combined in same cell as code
+            'line_items_range': {'start': 'AS35', 'end': 'BA46'},  # Updated end row to 46
+            'columns': {
+                'estimate': {
+                    'hours': 'AU',
+                    'rate': 'AV',
+                    'total': 'AW'
+                },
+                'actual': {
+                    'hours': 'AX',
+                    'total': 'AY'
+                }
+            },
+            'subtotal_cells': {
+                'estimate': 'AX47',  # Updated to correct cell
+                'actual': 'AZ47'     # Updated to correct cell
+            },
+            'pw_cells': {
+                'label': None,  # No P&W for Class K
+                'estimate': None,
+                'actual': None
+            },
+            'total_cells': {
+                'estimate': 'AX47',  # Same as subtotal since no P&W
+                'actual': 'AZ47'     # Same as subtotal since no P&W
+            },
+            'client_total_cell': 'BA47',  # Client subtotal
+            'required_fields': ['line_number', 'description']
+        },
+        'L': {
+            'class_code_cell': 'AS49',
+            'class_name_cell': 'AT49',  # Combined in same cell as code
+            'line_items_range': {'start': 'AS51', 'end': 'BA55'},
+            'columns': {
+                'estimate': {
+                    'days': 'AV',
+                    'rate': 'AW',
+                    'total': 'AX'
+                },
+                'actual': {
+                    'hours': 'AY',
+                    'total': 'AZ'
+                }
+            },
+            'subtotal_cells': {
+                'estimate': 'AX56',
+                'actual': 'AZ56'
+            },
+            'pw_cells': {
+                'label': None,  # No P&W for Class L
+                'estimate': None,
+                'actual': None
+            },
+            'total_cells': {
+                'estimate': 'AX56',  # Same as subtotal since no P&W
+                'actual': 'AZ56'
+            },
+            'client_total_cell': 'BA56',  # Client subtotal
+            'required_fields': ['line_number', 'description']
+        },
+        'M': {
+            'class_code_cell': 'BB1',
+            'class_name_cell': 'BB1',  # Combined in same cell as code
+            'line_items_range': {'start': 'BB3', 'end': 'BH33'},
+            'columns': {
+                'estimate': {
+                    'number': 'BD',  # # column
+                    'days': 'BE',    # DAYS
+                    'rate': 'BF',    # RATE
+                    'total': 'BG'    # Total
+                },
+                'actual': {
+                    'total': 'BH'    # Total
+                }
+            },
+            'subtotal_cells': {
+                'estimate': 'BG34',  # Estimated subtotal
+                'actual': 'BH34'     # Actual subtotal
+            },
+            'pw_cells': {
+                'label': 'BF35',     # P&W label
+                'estimate': 'BG35',  # P&W estimate
+                'actual': 'BH35'     # P&W actual
+            },
+            'total_cells': {
+                'estimate': 'BG36',  # Estimate Total after P&W
+                'actual': 'BH36'     # Actual Total after P&W
+            },
+            'required_fields': ['line_number', 'description']
+        },
+        'M2': {  # Additional Talent Expenses
+            'class_code_cell': 'BB38',
+            'class_name_cell': 'BB38',  # Combined in same cell
+            'line_items_range': {'start': 'BB40', 'end': 'BH44'},  # Line items range
+            'columns': {
+                'estimate': {
+                    'number': 'BH35',  # Number column
+                    'days': 'BH36',    # Days column
+                    'rate': 'BH37',    # Rate column
+                    'total': 'BH38'    # Total column
+                },
+                'actual': {
+                    'total': 'BH39'    # Actual total column
+                }
+            },
+            'subtotal_cells': {
+                'estimate': 'BG45',  # Estimated Total
+                'actual': 'BH45'     # Actual Total
+            },
+            'pw_cells': {
+                'label': None,  # No P&W for Additional Talent
+                'estimate': None,
+                'actual': None
+            },
+            'total_cells': {
+                'estimate': 'BG45',  # Same as subtotal since no P&W
+                'actual': 'BH45'     # Same as subtotal since no P&W
+            },
+            'required_fields': ['line_number', 'description']
+        },
+        'N': {  # Talent Expenses
+            'class_code_cell': 'BB47',
+            'class_name_cell': 'BB47',  # Combined in same cell
+            'line_items_range': {'start': 'BB49', 'end': 'BH54'},  # Line items range
+            'columns': {
+                'estimate': {
+                    'number': 'BD',  # # column
+                    'days': 'BE',    # Days column
+                    'rate': 'BF',    # Rate column
+                    'total': 'BG'    # Total column
+                },
+                'actual': {
+                    'total': 'BH'    # Total column
+                }
+            },
+            'subtotal_cells': {
+                'estimate': 'BG55',  # Estimated subtotal
+                'actual': 'BH55'     # Actual subtotal
+            },
+            'pw_cells': {
+                'label': None,  # No P&W for Class N
+                'estimate': None,
+                'actual': None
+            },
+            'total_cells': {
+                'estimate': 'BG55',  # Same as subtotal since no P&W
+                'actual': 'BH55'     # Same as subtotal since no P&W
+            },
+            'required_fields': ['line_number', 'description']
+        },
+        'O': {  # Agency Services
+            'class_code_cell': 'BI1',
+            'class_name_cell': 'BI1',  # Combined in same cell
+            'line_items_range': {'start': 'BI3', 'end': 'BP37'},  # Line items range
+            'columns': {
+                'estimate': {
+                    'hours': 'BK',    # Hours column
+                    'rate': 'BL',     # Rate column
+                    'total': 'BM'     # Total column
+                },
+                'actual': {
+                    'hours': 'BN',    # Hours column
+                    'total': 'BO'     # Total column
+                }
+            },
+            'subtotal_cells': {
+                'estimate': 'BM38',  # Estimated subtotal
+                'actual': 'BO38'     # Actual subtotal
+            },
+            'pw_cells': {
+                'label': None,  # No P&W for Class O
+                'estimate': None,
+                'actual': None
+            },
+            'total_cells': {
+                'estimate': 'BM38',  # Same as subtotal since no P&W
+                'actual': 'BO38'     # Same as subtotal since no P&W
+            },
+            'client_total_cell': 'BP38',  # Client total
+            'required_fields': ['line_number', 'description']
+        },
+        'P': {  # Post Expenses
+            'class_code_cell': 'BI40',
+            'class_name_cell': 'BI40',  # Combined in same cell
+            'line_items_range': {'start': 'BI42', 'end': 'BO51'},  # Line items range
+            'columns': {
+                'estimate': {
+                    'hours': 'BK',    # Hours column
+                    'rate': 'BL',     # Rate column
+                    'total': 'BM'     # Total column
+                },
+                'actual': {
+                    'hours': 'BN',    # Hours column
+                    'total': 'BO'     # Total column
+                }
+            },
+            'subtotal_cells': {
+                'estimate': 'BM52',  # Estimated subtotal
+                'actual': 'BO52'     # Actual subtotal
+            },
+            'pw_cells': {
+                'label': None,  # No P&W for Class P
+                'estimate': None,
+                'actual': None
+            },
+            'total_cells': {
+                'estimate': 'BM52',  # Same as subtotal since no P&W
+                'actual': 'BO52'     # Same as subtotal since no P&W
+            },
+            'required_fields': ['line_number', 'description']
         }
     }
     
@@ -382,42 +596,70 @@ class BudgetProcessor:
         return f"{clean_file}-{clean_sheet}-{date_str}_{increment}"
 
     def _get_class_totals(self, spreadsheet_id: str, sheet_title: str, mapping: Dict) -> Dict:
-        """Get class totals by reading directly from cells."""
+        """Get class totals using batch request."""
         values = {}
+        ranges = []
+        
+        # Collect all ranges we need to fetch
+        for key in ['estimate', 'actual']:
+            # Subtotal cells
+            ranges.append(f"'{sheet_title}'!{mapping['subtotal_cells'][key]}")
+            
+            # P&W cells if they exist
+            if mapping['pw_cells'].get('estimate') is not None:
+                ranges.append(f"'{sheet_title}'!{mapping['pw_cells'][key]}")
+                
+            # Total cells
+            ranges.append(f"'{sheet_title}'!{mapping['total_cells'][key]}")
+        
+        # Add client total cell for Class K
+        if mapping.get('client_total_cell'):
+            ranges.append(f"'{sheet_title}'!{mapping['client_total_cell']}")
+        
+        # Fetch all ranges in one batch request
+        results = self._get_range_values_batch(spreadsheet_id, ranges)
+        
+        # Process results
+        result_index = 0
         
         # Get subtotal values
         for key in ['estimate', 'actual']:
-            cell = mapping['subtotal_cells'][key]
-            cell_range = f"'{sheet_title}'!{cell}"
-            result = self._get_range_values(spreadsheet_id, cell_range)
-            value = result[0][0] if result and result[0] else "$0.00"
+            value = results[result_index][0][0] if results[result_index] and results[result_index][0] else "$0.00"
+            # Ensure proper dollar sign formatting
+            if not isinstance(value, str) or not value.startswith('$'):
+                value = f"${value}" if value else "$0.00"
             values[f'class_{key}_subtotal'] = value
-            if value == "$0.00":
-                logger.debug(f"Empty or zero {key} subtotal value in cell {cell}")
+            result_index += 1
         
         # Get P&W values if they exist
         if mapping['pw_cells'].get('estimate') is not None:
             for key in ['estimate', 'actual']:
-                cell = mapping['pw_cells'][key]
-                cell_range = f"'{sheet_title}'!{cell}"
-                result = self._get_range_values(spreadsheet_id, cell_range)
-                value = result[0][0] if result and result[0] else "$0.00"
+                value = results[result_index][0][0] if results[result_index] and results[result_index][0] else "$0.00"
+                # Ensure proper dollar sign formatting
+                if not isinstance(value, str) or not value.startswith('$'):
+                    value = f"${value}" if value else "$0.00"
                 values[f'class_{key}_pnw'] = value
-                if value == "$0.00":
-                    logger.debug(f"Empty or zero {key} P&W value in cell {cell}")
+                result_index += 1
         else:
             values['class_estimate_pnw'] = None
             values['class_actual_pnw'] = None
         
         # Get total values
         for key in ['estimate', 'actual']:
-            cell = mapping['total_cells'][key]
-            cell_range = f"'{sheet_title}'!{cell}"
-            result = self._get_range_values(spreadsheet_id, cell_range)
-            value = result[0][0] if result and result[0] else "$0.00"
+            value = results[result_index][0][0] if results[result_index] and results[result_index][0] else "$0.00"
+            # Ensure proper dollar sign formatting
+            if not isinstance(value, str) or not value.startswith('$'):
+                value = f"${value}" if value else "$0.00"
             values[f'class_{key}_total'] = value
-            if value == "$0.00":
-                logger.debug(f"Empty or zero {key} total value in cell {cell}")
+            result_index += 1
+            
+        # Get client total for Class K
+        if mapping.get('client_total_cell'):
+            value = results[result_index][0][0] if results[result_index] and results[result_index][0] else "$0.00"
+            # Ensure proper dollar sign formatting
+            if not isinstance(value, str) or not value.startswith('$'):
+                value = f"${value}" if value else "$0.00"
+            values['class_client_total'] = value
         
         return values
 
@@ -467,7 +709,59 @@ class BudgetProcessor:
             }
             
             # Add values based on class type
-            if class_code == 'A':
+            if class_code == 'M2':  # Additional Talent Expenses
+                # Get raw values first
+                estimate_number = row[2] if len(row) > 2 else None
+                estimate_days = row[3] if len(row) > 3 else None
+                estimate_rate = row[4] if len(row) > 4 else None
+                estimate_total = row[5] if len(row) > 5 else None
+                actual_total = row[6] if len(row) > 6 else None
+                
+                # Update line item with properly formatted values
+                line_item.update({
+                    'estimate_number': estimate_number,  # Keep as is for number
+                    'estimate_days': estimate_days,      # Keep as is for days
+                    'estimate_rate': estimate_rate,      # Keep as is for rate
+                    'estimate_total': estimate_total if isinstance(estimate_total, str) and estimate_total.startswith('$') else f"${estimate_total}" if estimate_total else None,
+                    'actual_total': actual_total if isinstance(actual_total, str) and actual_total.startswith('$') else f"${actual_total}" if actual_total else None
+                })
+                
+                # Don't validate days for percentage rates
+                if line_item.get('estimate_rate') and not line_item.get('estimate_days') and not str(line_item.get('estimate_rate')).endswith('%'):
+                    line_item.setdefault('validation_messages', []).append("Has estimate rate but missing days")
+            elif class_code == 'L':  # Class L has days and hours
+                # Get raw values first
+                estimate_days = row[2] if len(row) > 2 else None
+                estimate_rate = row[3] if len(row) > 3 else None
+                estimate_total = row[4] if len(row) > 4 else None
+                actual_hours = row[5] if len(row) > 5 else None
+                actual_total = row[6] if len(row) > 6 else None
+                
+                # Update line item with properly formatted values
+                line_item.update({
+                    'estimate_days': estimate_days,  # Keep as is for days
+                    'estimate_rate': estimate_rate,  # Keep as is for rate
+                    'estimate_total': estimate_total if isinstance(estimate_total, str) and estimate_total.startswith('$') else f"${estimate_total}" if estimate_total else None,
+                    'actual_hours': actual_hours,    # Keep as is for hours
+                    'actual_total': actual_total if isinstance(actual_total, str) and actual_total.startswith('$') else f"${actual_total}" if actual_total else None
+                })
+                
+                # Add class client total if available
+                if 'class_client_total' in class_totals:
+                    line_item['class_client_total'] = class_totals['class_client_total']
+                
+                # Validate days for Class L
+                if line_item.get('estimate_rate') and not line_item.get('estimate_days'):
+                    line_item.setdefault('validation_messages', []).append("Has estimate rate but missing days")
+            elif class_code == 'K':
+                line_item.update({
+                    'estimate_hours': row[2] if len(row) > 2 else None,
+                    'estimate_rate': row[3] if len(row) > 3 else None,
+                    'estimate_total': row[4] if len(row) > 4 else None,
+                    'actual_hours': row[5] if len(row) > 5 else None,
+                    'actual_total': row[6] if len(row) > 6 else None
+                })
+            elif class_code == 'A':
                 line_item.update({
                     'estimate_days': row[2] if len(row) > 2 else None,
                     'estimate_rate': row[3] if len(row) > 3 else None,
@@ -509,6 +803,25 @@ class BudgetProcessor:
                     'estimate_total': row[5] if len(row) > 5 else None,
                     'actual_total': row[6] if len(row) > 6 else None
                 })
+            elif class_code == 'J':  # Class J has number, days, rate, total
+                line_item.update({
+                    'estimate_number': row[2] if len(row) > 2 else None,
+                    'estimate_days': row[3] if len(row) > 3 else None,
+                    'estimate_rate': row[4] if len(row) > 4 else None,
+                    'estimate_total': row[5] if len(row) > 5 else None,
+                    'actual_total': row[6] if len(row) > 6 else None
+                })
+            elif class_code == 'O':  # Class O has hours instead of days
+                line_item.update({
+                    'estimate_hours': row[2] if len(row) > 2 else None,
+                    'estimate_rate': row[3] if len(row) > 3 else None,
+                    'estimate_total': row[4] if len(row) > 4 else None,
+                    'actual_hours': row[5] if len(row) > 5 else None,
+                    'actual_total': row[6] if len(row) > 6 else None
+                })
+                # Add client total if available
+                if 'class_client_total' in class_totals:
+                    line_item['class_client_total'] = class_totals['class_client_total']
             else:  # Classes C, D, E
                 line_item.update({
                     'estimate_number': row[2] if len(row) > 2 else None,
@@ -668,13 +981,45 @@ class BudgetProcessor:
             raise
 
     def _get_range_values(self, spreadsheet_id: str, range_name: str) -> list:
-        """Fetch values for a specific range."""
-        result = self.sheets_service.spreadsheets().values().get(
-            spreadsheetId=spreadsheet_id,
-            range=range_name
-        ).execute()
-        return result.get('values', [])
-
+        """Fetch values for a specific range with retry logic."""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                result = self.sheets_service.spreadsheets().values().get(
+                    spreadsheetId=spreadsheet_id,
+                    range=range_name
+                ).execute()
+                return result.get('values', [])
+            except Exception as e:
+                if 'RATE_LIMIT_EXCEEDED' in str(e):
+                    if attempt < max_retries - 1:
+                        logger.info(f"Rate limit hit, waiting before retry {attempt + 1}/{max_retries}")
+                        time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+                        continue
+                raise
+                
+    def _get_range_values_batch(self, spreadsheet_id: str, ranges: List[str]) -> List[List]:
+        """Fetch multiple ranges in a single batch request."""
+        try:
+            result = self.sheets_service.spreadsheets().values().batchGet(
+                spreadsheetId=spreadsheet_id,
+                ranges=ranges
+            ).execute()
+            
+            # Extract values from each range
+            values = []
+            for value_range in result.get('valueRanges', []):
+                values.append(value_range.get('values', []))
+            return values
+            
+        except Exception as e:
+            if 'RATE_LIMIT_EXCEEDED' in str(e):
+                logger.warning("Rate limit hit in batch request, retrying with delay...")
+                time.sleep(2)
+                return self._get_range_values_batch(spreadsheet_id, ranges)
+            logger.error(f"Error in batch request: {str(e)}")
+            raise
+            
     def _get_sheet_info(self, spreadsheet_id: str, target_gid: str = None) -> dict:
         """Get sheet information including title and GID."""
         try:
