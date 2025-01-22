@@ -9,6 +9,8 @@ from pathlib import Path
 import json
 from typing import Dict, List, Any, Optional
 import time
+from src.models.metadata import BudgetMetadata
+from googleapiclient.errors import HttpError
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -880,124 +882,143 @@ class BudgetProcessor:
             
         return None
 
-    def process_sheet(self, spreadsheet_id: str, target_gid: str = None) -> tuple[list, dict]:
-        """Process budget from Google Sheets"""
+    def _process_class(self, spreadsheet_id: str, sheet_gid: str, class_code: str, mapping: dict) -> list:
+        """Process a single budget class."""
         try:
-            # Get sheet info
-            sheet_info = self._get_sheet_info(spreadsheet_id, target_gid)
+            # Get sheet info first
+            sheet_info = self._get_sheet_info(spreadsheet_id, sheet_gid)
             sheet_title = sheet_info['title']
             
+            # Get class header
+            header_range = f"'{sheet_title}'!{mapping['class_code_cell']}:{mapping['class_name_cell']}"
+            header_values = self._get_range_values(spreadsheet_id, header_range)
+            
+            # Debug header values
+            logger.info(f"Class {class_code} header range: {header_range}")
+            logger.info(f"Class {class_code} header values: {header_values}")
+            
+            if not header_values:
+                logger.warning(f"No header values found for class {class_code}")
+                return []
+            
+            # Get class name using the helper method
+            class_name = self._get_class_name(header_values, class_code, mapping, spreadsheet_id, sheet_title)
+            if not class_name:
+                logger.warning(f"No class name found for class {class_code}")
+                return []
+            
+            # Get all data including calculated totals
+            data_range = f"'{sheet_title}'!{mapping['line_items_range']['start']}:{mapping['line_items_range']['end']}"
+            data_values = self._get_range_values(spreadsheet_id, data_range)
+            
+            if not data_values:
+                logger.warning(f"No data values found for class {class_code}")
+                return []
+            
+            # Get totals directly from cells
+            class_totals = self._get_class_totals(spreadsheet_id, sheet_title, mapping)
+            
+            # Process each line item
+            processed_rows = []
+            for row_number, row in enumerate(data_values, start=1):
+                if not row:  # Skip empty rows
+                    continue
+                
+                if len(row) < 2:  # Need at least number and description
+                    logger.debug(f"Incomplete row {row_number} in class {class_code}: {row}")
+                    continue
+                
+                # Process line item with class totals
+                line_item = self._process_line_item(row, class_code, class_name, class_totals, row_number)
+                if line_item:
+                    processed_rows.append(line_item)
+            
+            return processed_rows
+
+        except Exception as e:
+            logger.error(f"Error processing class {class_code}: {str(e)}")
+            return []
+
+    def _generate_version_id(self, spreadsheet_id: str, sheet_gid: str) -> str:
+        """Generate a unique version ID for the budget processing."""
+        timestamp = datetime.now().strftime("%m-%d-%H_%M")
+        return f"GOOG0324PIXELDR_Estimate-Brand_DR_Combined-{timestamp}"
+
+    def process_sheet(self, spreadsheet_id: str, target_gid: str) -> tuple[list, BudgetMetadata]:
+        """Process budget data from the specified sheet."""
+        try:
             processed_rows = []
             validation_issues = []
-            
-            # Process each class section
-            for class_code, mapping in self.CLASS_MAPPINGS.items():
-                try:
-                    # Get class header
-                    header_range = f"'{sheet_title}'!{mapping['class_code_cell']}:{mapping['class_name_cell']}"
-                    header_values = self._get_range_values(spreadsheet_id, header_range)
-                    
-                    # Debug header values
-                    logger.info(f"Class {class_code} header range: {header_range}")
-                    logger.info(f"Class {class_code} header values: {header_values}")
-                    
-                    if not header_values:
-                        logger.warning(f"No header values found for class {class_code}")
-                        continue
-                    
-                    # Get class name using the new helper method
-                    class_name = self._get_class_name(header_values, class_code, mapping, spreadsheet_id, sheet_title)
-                    if not class_name:
-                        logger.warning(f"No class name found for class {class_code}")
-                        continue
-                        
-                    # Get all data including calculated totals
-                    data_range = f"'{sheet_title}'!{mapping['line_items_range']['start']}:{mapping['line_items_range']['end']}"
-                    data_values = self._get_range_values(spreadsheet_id, data_range)
-                    
-                    if not data_values:
-                        logger.warning(f"No data values found for class {class_code}")
-                        continue
-                    
-                    # Get totals directly from cells
-                    class_totals = self._get_class_totals(spreadsheet_id, sheet_title, mapping)
-                    
-                    # Process each line item
-                    for row_number, row in enumerate(data_values, start=1):
-                        if not row:  # Skip empty rows
-                            continue
-                            
-                        if len(row) < 2:  # Need at least number and description
-                            logger.debug(f"Incomplete row {row_number} in class {class_code}: {row}")
-                            continue
-                            
-                        # Process line item with class totals
-                        line_item = self._process_line_item(row, class_code, class_name, class_totals, row_number)
-                        if line_item:
-                            processed_rows.append(line_item)
-                            if line_item['validation_messages']:
-                                validation_issues.append(line_item['validation_messages'])
-                        
-                except Exception as e:
-                    logger.error(f"Error processing class {class_code}: {str(e)}")
-                    continue
-                    
-            # Create metadata
-            metadata = {
-                'project_info': {
-                    'name': sheet_info['spreadsheet_title'],
-                    'sheet': sheet_title,
-                },
-                'summary': {
-                    'total_rows': len(processed_rows),
-                    'processed_classes': {
-                        class_code: {
-                            'estimate_total': next((row['class_estimate_total'] for row in processed_rows if row['class_code'] == class_code), '$0.00'),
-                            'actual_total': next((row['class_actual_total'] for row in processed_rows if row['class_code'] == class_code), '$0.00'),
-                            'row_count': sum(1 for row in processed_rows if row['class_code'] == class_code)
-                        }
-                        for class_code in set(row['class_code'] for row in processed_rows)
-                    },
-                    'validation_count': len(validation_issues)
-                },
-                'upload_info': {
-                    'id': self._generate_upload_id(sheet_info['spreadsheet_title'], sheet_title),
-                    'timestamp': datetime.now().isoformat(),
+            processed_classes = set()
+
+            # Initialize metadata
+            version_id = self._generate_version_id(spreadsheet_id, target_gid)
+            metadata = BudgetMetadata(
+                version_id=version_id,
+                source_information={
+                    'spreadsheet_id': spreadsheet_id,
                     'sheet_gid': target_gid,
-                    'spreadsheet_id': spreadsheet_id
+                    'processing_date': datetime.now().isoformat()
                 }
-            }
-            
+            )
+
+            # Process each class with delay between classes
+            for i, (class_code, mapping) in enumerate(self.CLASS_MAPPINGS.items()):
+                # Add delay every 2 classes to avoid rate limits
+                if i > 0 and i % 2 == 0:
+                    wait_time = 3  # 3 second delay
+                    logger.info(f"Pausing for {wait_time}s to avoid rate limits...")
+                    time.sleep(wait_time)
+                    
+                class_rows = self._process_class(spreadsheet_id, target_gid, class_code, mapping)
+                processed_rows.extend(class_rows)
+                processed_classes.add(class_code)
+
+                # Track validation issues
+                validation_issues.extend([
+                    row for row in class_rows 
+                    if row['validation_status'] == 'warning'
+                ])
+
+            # Update metadata with processing results
+            metadata.processing_statistics.update({
+                'total_rows_processed': len(processed_rows),
+                'classes_processed': sorted(list(processed_classes)),
+                'validation_issues_by_class': {
+                    class_code: len([row for row in validation_issues 
+                                   if row['class_code'] == class_code])
+                    for class_code in processed_classes
+                },
+                'total_validation_issues': len(validation_issues)
+            })
+
             # Log processing summary
             logger.info(f"\nProcessing Summary:")
-            logger.info(f"- Total rows processed: {metadata['summary']['total_rows']}")
-            logger.info(f"- Classes processed: {', '.join(metadata['summary']['processed_classes'].keys())}")
-            logger.info(f"- Validation issues: {metadata['summary']['validation_count']}")
-            
+            logger.info(f"Total rows processed: {len(processed_rows)}")
+            logger.info(f"Classes processed: {', '.join(sorted(processed_classes))}")
+            logger.info(f"Total validation issues: {len(validation_issues)}")
+
             return processed_rows, metadata
-            
+
         except Exception as e:
             logger.error(f"Error processing sheet: {str(e)}")
             raise
 
-    def _get_range_values(self, spreadsheet_id: str, range_name: str) -> list:
-        """Fetch values for a specific range with retry logic."""
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                result = self.sheets_service.spreadsheets().values().get(
-                    spreadsheetId=spreadsheet_id,
-                    range=range_name
-                ).execute()
-                return result.get('values', [])
-            except Exception as e:
-                if 'RATE_LIMIT_EXCEEDED' in str(e):
-                    if attempt < max_retries - 1:
-                        logger.info(f"Rate limit hit, waiting before retry {attempt + 1}/{max_retries}")
-                        time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
-                        continue
-                raise
-                
+    def _get_range_values(self, spreadsheet_id: str, range_name: str, retry_count=0, max_retries=3) -> list:
+        """Get values from a range with rate limit handling."""
+        try:
+            return self.sheets_service.spreadsheets().values().get(
+                spreadsheetId=spreadsheet_id,
+                range=range_name
+            ).execute().get('values', [])
+        except HttpError as e:
+            if 'RATE_LIMIT_EXCEEDED' in str(e) and retry_count < max_retries:
+                wait_time = (2 ** retry_count) * 2  # Exponential backoff
+                logger.info(f"Rate limit hit, waiting {wait_time}s before retry {retry_count + 1}/{max_retries}")
+                time.sleep(wait_time)
+                return self._get_range_values(spreadsheet_id, range_name, retry_count + 1)
+            raise
+
     def _get_range_values_batch(self, spreadsheet_id: str, ranges: List[str]) -> List[List]:
         """Fetch multiple ranges in a single batch request."""
         try:
@@ -1021,33 +1042,37 @@ class BudgetProcessor:
             raise
             
     def _get_sheet_info(self, spreadsheet_id: str, target_gid: str = None) -> dict:
-        """Get sheet information including title and GID."""
+        """Get sheet information from spreadsheet."""
         try:
-            # Get spreadsheet info
-            spreadsheet = self.sheets_service.spreadsheets().get(
-                spreadsheetId=spreadsheet_id
-            ).execute()
+            # Get spreadsheet metadata
+            spreadsheet = self.sheets_service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+            spreadsheet_title = spreadsheet.get('properties', {}).get('title', '')
             
-            # Get spreadsheet title
-            spreadsheet_title = spreadsheet.get('properties', {}).get('title', 'Untitled')
-            
-            # Find sheet by GID if provided, otherwise use first sheet
+            # Find target sheet
+            sheets = spreadsheet.get('sheets', [])
             target_sheet = None
+            
             if target_gid:
-                for sheet in spreadsheet['sheets']:
-                    if str(sheet['properties'].get('sheetId')) == target_gid:
-                        target_sheet = sheet
-                        break
-            else:
-                target_sheet = spreadsheet['sheets'][0]
+                target_sheet = next(
+                    (sheet for sheet in sheets 
+                     if str(sheet['properties']['sheetId']) == str(target_gid)),
+                    None
+                )
             
             if not target_sheet:
-                raise ValueError(f"Sheet with GID {target_gid} not found")
+                # Default to first sheet if target not found
+                target_sheet = sheets[0] if sheets else None
+            
+            if not target_sheet:
+                raise ValueError("No valid sheet found in spreadsheet")
+            
+            sheet_title = target_sheet['properties']['title']
+            sheet_id = target_sheet['properties']['sheetId']
             
             return {
-                'title': target_sheet['properties']['title'],
-                'gid': str(target_sheet['properties']['sheetId']),
-                'spreadsheet_title': spreadsheet_title
+                'spreadsheet_title': spreadsheet_title,
+                'title': sheet_title,
+                'id': sheet_id
             }
             
         except Exception as e:
