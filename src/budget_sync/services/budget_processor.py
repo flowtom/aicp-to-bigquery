@@ -4,11 +4,17 @@ from google.cloud import bigquery
 import pandas as pd
 from datetime import datetime
 import uuid
+import json
 from typing import Dict, Any, List, Optional
+from src.budget_sync.services.cover_sheet_processor import CoverSheetProcessor
+from budget_sync.utils.data_validation import validate_budget_row, safe_float_convert, safe_int_convert
+import logging
 
-from utils.data_validation import validate_budget_row, safe_float_convert, safe_int_convert
+# Load configuration
+with open('config/config.json', 'r') as f:
+    config = json.load(f)
 
-class AICPBudgetProcessor:
+class BudgetProcessor:
     def __init__(self, project_id):
         self.project_id = project_id
         self.client = bigquery.Client()
@@ -20,99 +26,164 @@ class AICPBudgetProcessor:
         )
         self.sheets_service = build('sheets', 'v4', credentials=self.credentials)
 
-    def process_budget(self, spreadsheet_id: str, metadata: Dict[str, Any]) -> str:
+    def process_budget(self, spreadsheet_id: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """Process budget from Google Sheets"""
-        upload_id = str(uuid.uuid4())
-        timestamp = datetime.now().isoformat()
-        
-        # Get spreadsheet data
-        sheet = self.sheets_service.spreadsheets()
-        result = sheet.get(spreadsheetId=spreadsheet_id, 
-                         includeGridData=True).execute()
-        
-        processed_data = []
-        error_rows = []
+        try:
+            # Get spreadsheet data
+            sheet = self.sheets_service.spreadsheets()
+            result = sheet.get(spreadsheetId=spreadsheet_id, 
+                             includeGridData=True).execute()
+            
+            # Process cover sheet
+            cover_sheet_processor = CoverSheetProcessor(self.sheets_service)
+            cover_sheet_data = cover_sheet_processor.extract_cover_sheet(
+                result['sheets'][0]['data'][0]['rowData']
+            )
+            
+            # Process line items
+            line_items_data = self._process_line_items(result['sheets'][1]['data'][0]['rowData'])
+            
+            # Create metadata
+            metadata_record = {
+                'upload_id': str(uuid.uuid4()),
+                'upload_timestamp': datetime.now().isoformat(),
+                'budget_name': metadata['budget_name'],
+                'version_status': metadata['version_status'],
+                'cover_sheet': cover_sheet_data,
+                'project_info': {
+                    'name': metadata['project_name'],
+                    'start_date': metadata['project_start_date'],
+                    'end_date': metadata['project_end_date'],
+                    'client_name': metadata['client_name'],
+                    'producer_name': metadata['producer_name']
+                },
+                'processing_info': {
+                    'user_email': metadata['user_email'],
+                    'version_notes': metadata.get('version_notes'),
+                    'previous_version_id': metadata.get('previous_version_id')
+                }
+            }
+            
+            return {
+                'metadata': metadata_record,
+                'rows': line_items_data['line_items'],
+                'validation_errors': line_items_data['errors']
+            }
+            
+        except Exception as e:
+            logging.error(f"Error processing budget: {str(e)}")
+            raise
+
+    def _process_line_items(self, grid_data):
+        """Process line items from the grid data."""
+        line_items = []
+        errors = []
         current_class = None
         current_class_code = None
+        row_count = len(grid_data)
         
-        # Process each sheet in the spreadsheet
-        for sheet in result['sheets']:
-            grid_data = sheet['data'][0]['rowData']
-            
-            for row_idx, row_data in enumerate(grid_data, 1):
-                if 'values' not in row_data:
+        logging.info(f"Processing {row_count} rows")
+        
+        for row_idx, row in enumerate(grid_data):
+            try:
+                # Skip empty rows
+                if not row or len(row) < 2:
+                    logging.debug(f"Row {row_idx + 1}: Empty row")
                     continue
                     
-                row = self._extract_row_values(row_data['values'])
+                # Get first two columns which determine the type of row
+                col_a = str(row[0] or '').strip()
+                col_b = str(row[1] or '').strip()
                 
-                # Skip empty rows
-                if not any(row):
+                # Skip if both columns are empty
+                if not col_a and not col_b:
+                    logging.debug(f"Row {row_idx + 1}: Empty row")
                     continue
+                    
+                # Log row for debugging
+                logging.debug(f"Row {row_idx + 1}: {row}")
                 
-                # Check for class header
-                if row[0] and isinstance(row[0], str) and ': ' in row[0]:
-                    current_class_code, current_class = self._parse_class_header(row[0])
+                # Check for class headers
+                if col_a and not col_b and ':' in col_a:
+                    current_class = col_a.split(':')[0].strip()
+                    current_class_code = None
+                    logging.info(f"Found class: {current_class}")
                     continue
+                    
+                # Skip header rows
+                if any(header in col_a.upper() for header in ['ESTIMATE', 'DAYS', 'RATE', 'TOTAL']):
+                    continue
+                    
+                # Process line items only if we have a current class
+                if current_class and len(row) >= 4:
+                    # Try to extract line number from first column
+                    if col_a.isdigit():
+                        current_class_code = col_a
+                    
+                    # Only process if we have a class code and description
+                    if current_class_code and col_b:
+                        line_item = {
+                            'class': current_class,
+                            'line_number': current_class_code,
+                            'description': col_b,
+                            'values': self._extract_row_values(row)
+                        }
+                        line_items.append(line_item)
+                        
+            except Exception as e:
+                error = f"Error processing row {row_idx + 1}: {str(e)}"
+                logging.error(error)
+                errors.append(error)
                 
-                # Process line items
-                if current_class and self._is_line_item(row):
-                    line_item = self._process_line_item(
-                        row,
-                        current_class_code,
-                        current_class,
-                        upload_id,
-                        timestamp,
-                        metadata['budget_name'],
-                        metadata['user_email']
-                    )
-                    if line_item:
-                        is_valid, validation_errors = validate_budget_row(line_item)
-                        if is_valid:
-                            processed_data.append(line_item)
-                        else:
-                            error_rows.append({
-                                'row_number': row_idx,
-                                'data': row,
-                                'errors': validation_errors
-                            })
-        
-        if error_rows:
-            print("\nValidation errors found:")
-            for error_row in error_rows:
-                print(f"\nRow {error_row['row_number']}:")
-                print(f"Data: {error_row['data']}")
-                print(f"Errors: {error_row['errors']}")
-            
-            if not processed_data:
-                raise ValueError("No valid rows found after validation")
-        
-        # Create DataFrame
-        df = pd.DataFrame(processed_data)
-        
-        # Add metadata
-        metadata_record = self._create_metadata_record(
-            upload_id, timestamp, metadata
-        )
-        
-        # Save to BigQuery
-        self._save_to_bigquery(df, metadata_record)
-        
-        return upload_id
+        logging.info(f"Processed {len(line_items)} line items with {len(errors)} errors")
+        return {'line_items': line_items, 'errors': errors}
 
-    def _extract_row_values(self, cells):
-        """Extract values from Google Sheets cell data"""
-        values = []
-        for cell in cells:
-            if 'effectiveValue' in cell:
-                if 'numberValue' in cell['effectiveValue']:
-                    values.append(cell['effectiveValue']['numberValue'])
-                elif 'stringValue' in cell['effectiveValue']:
-                    values.append(cell['effectiveValue']['stringValue'])
-                else:
-                    values.append(None)
-            else:
-                values.append(None)
+    def _extract_row_values(self, row):
+        """Extract numeric values from a row."""
+        values = {}
+        
+        # Define value mappings
+        value_mappings = {
+            'days': 2,
+            'rate': 3,
+            'total': 4,
+            'actual_days': 5,
+            'actual_rate': 6,
+            'actual_total': 7
+        }
+        
+        for key, col_idx in value_mappings.items():
+            if col_idx < len(row):
+                try:
+                    value = row[col_idx]
+                    if value:
+                        # Handle different value types
+                        if isinstance(value, (int, float)):
+                            values[key] = float(value)
+                        elif isinstance(value, str):
+                            # Remove currency symbols and commas
+                            clean_value = value.replace('$', '').replace(',', '').strip()
+                            if clean_value:
+                                try:
+                                    values[key] = float(clean_value)
+                                except ValueError:
+                                    pass
+                except Exception as e:
+                    logging.warning(f"Error extracting {key} from row: {str(e)}")
+                    
         return values
+
+    def _safe_float(self, value) -> Optional[float]:
+        """Safely convert a value to float."""
+        if value is None:
+            return None
+        try:
+            if isinstance(value, str):
+                # Remove currency formatting
+                value = value.replace('$', '').replace(',', '')
+            return float(value) if str(value).strip() else None
+        except (ValueError, TypeError):
+            return None
 
     def _parse_class_header(self, header_text: str) -> tuple[Optional[str], str]:
         """Parse class code and name from header"""
@@ -121,62 +192,37 @@ class AICPBudgetProcessor:
             return parts[0].strip(), parts[1].strip()
         return None, header_text.strip()
 
-    def _is_line_item(self, row: List[Any]) -> bool:
-        """Check if row is a line item"""
-        return bool(row[0]) and (
-            str(row[0]).isdigit() or 
-            (isinstance(row[0], str) and len(row[0]) > 1)
-        )
-
-    def _process_line_item(
-        self, 
-        row: List[Any], 
-        class_code: str, 
-        class_name: str, 
-        upload_id: str, 
-        timestamp: str,
-        budget_name: str,
-        user_email: str
-    ) -> Optional[Dict[str, Any]]:
-        """Process a single line item row"""
-        try:
-            return {
-                'upload_id': upload_id,
-                'user_email': user_email,
-                'budget_name': budget_name,
-                'upload_timestamp': timestamp,
-                'class_code': class_code,
-                'class_name': class_name,
-                'line_item_number': safe_int_convert(row[0]),
-                'line_item_description': str(row[1]).strip() if row[1] else None,
-                'estimate_days': safe_float_convert(row[2]),
-                'estimate_rate': safe_float_convert(row[3]),
-                'estimate_total': safe_float_convert(row[4]),
-                'actual_days': safe_float_convert(row[5]),
-                'actual_rate': safe_float_convert(row[6]),
-                'actual_total': safe_float_convert(row[7]),
-                'raw_row_data': str(row)
-            }
-        except Exception as e:
-            print(f"Error processing row: {row}. Error: {str(e)}")
-            return None
-
-    def _create_metadata_record(self, upload_id: str, timestamp: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
-        """Create metadata record"""
-        return {
-            'upload_id': upload_id,
-            'upload_timestamp': timestamp,
-            'budget_name': metadata['budget_name'],
-            'version_status': metadata['version_status'],
-            'project_name': metadata['project_name'],
-            'project_start_date': metadata['project_start_date'],
-            'project_end_date': metadata['project_end_date'],
-            'client_name': metadata['client_name'],
-            'producer_name': metadata['producer_name'],
-            'user_email': metadata['user_email'],
-            'version_notes': metadata.get('version_notes'),
-            'previous_version_id': metadata.get('previous_version_id')
-        }
+    def _is_line_item(self, row: list) -> bool:
+        """Check if row is a valid line item."""
+        if not row or len(row) < 2:
+            return False
+        
+        # Skip header rows
+        if isinstance(row[0], str):
+            header_terms = [
+                'PRODUCTION COSTS SUMMARY',
+                'ESTIMATE',
+                'DAYS',
+                'TOTAL',
+                'SUB TOTAL',
+                'P&W',
+                'PAGE',
+                'SUMMARY'
+            ]
+            if any(term.lower() in str(row[0]).lower() for term in header_terms):
+                return False
+        
+        # Check if first column has a line number (numeric or string)
+        first_col = str(row[0]).strip()
+        if not first_col:
+            return False
+        
+        # Check if second column has a description
+        second_col = str(row[1]).strip()
+        if not second_col:
+            return False
+        
+        return True
 
     def _save_to_bigquery(self, df: pd.DataFrame, metadata_record: Dict[str, Any]) -> None:
         """Save processed data to BigQuery"""
@@ -197,4 +243,24 @@ class AICPBudgetProcessor:
         job = self.client.load_table_from_dataframe(
             metadata_df, metadata_table_id, job_config=job_config
         )
-        job.result() 
+        job.result()
+
+    def _process_rows(self, rows: List[List[Any]]) -> List[Dict[str, Any]]:
+        """Process rows from the budget sheet."""
+        processed_rows = []
+        for i, row in enumerate(rows):
+            # Skip completely empty rows
+            if not any(cell is not None and str(cell).strip() != '' for cell in row):
+                continue
+                
+            logging.debug(f"Processing row {i}: {row}")
+            
+            if not self._is_line_item(row):
+                logging.debug(f"Skipping non-line item row {i}")
+                continue
+
+            processed_row = self._process_row(row)
+            if processed_row:
+                processed_rows.append(processed_row)
+                
+        return processed_rows 

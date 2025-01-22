@@ -20,44 +20,18 @@ def safe_int_convert(value: Any) -> Union[int, None]:
         return None
 
 def validate_budget_row(row_data: Dict[str, Any]) -> Tuple[bool, List[str]]:
-    """
-    Validates a single budget row before sending to BigQuery.
-    Returns (is_valid, errors)
-    """
+    """Validate a budget row"""
     errors = []
     
-    # Required fields with their expected types
-    required_fields = {
-        'upload_id': str,
-        'user_email': str,
-        'budget_name': str,
-        'upload_timestamp': str,  # Will be converted to TIMESTAMP in BigQuery
-        'class_code': str,
-        'class_name': str,
-        'line_item_number': int,
-        'line_item_description': str
-    }
-
-    # Check required fields
-    for field, expected_type in required_fields.items():
-        if field not in row_data:
-            errors.append(f"Missing required field: {field}")
-            continue
+    # Basic validation
+    if not row_data:
+        return False, ["Empty row data"]
+        
+    # Required fields
+    if 'line_item_number' not in row_data or row_data['line_item_number'] is None:
+        errors.append("Required field cannot be NULL: line_item_number")
             
-        value = row_data[field]
-        if value is None:
-            errors.append(f"Required field cannot be NULL: {field}")
-            continue
-
-        # Special handling for integers
-        if expected_type == int:
-            if not isinstance(value, (int, float)) or not float(value).is_integer():
-                errors.append(f"Invalid integer value for {field}: {value}")
-        # Regular type checking for other types
-        elif not isinstance(value, expected_type):
-            errors.append(f"Invalid type for {field}: expected {expected_type.__name__}, got {type(value).__name__}")
-
-    # Validate numeric fields (these can be NULL)
+    # Validate numeric fields
     numeric_fields = [
         'estimate_days', 'estimate_rate', 'estimate_total',
         'actual_days', 'actual_rate', 'actual_total'
@@ -68,22 +42,10 @@ def validate_budget_row(row_data: Dict[str, Any]) -> Tuple[bool, List[str]]:
             value = row_data[field]
             if not isinstance(value, (int, float)):
                 try:
-                    float(value)  # Try to convert string to float
+                    float(value)
                 except (ValueError, TypeError):
                     errors.append(f"Invalid numeric value for {field}: {value}")
-
-    # Additional validation rules
-    if 'class_code' in row_data and row_data['class_code']:
-        if not row_data['class_code'].strip():
-            errors.append("class_code cannot be empty string")
-
-    if 'upload_timestamp' in row_data and row_data['upload_timestamp']:
-        try:
-            # Verify timestamp format
-            datetime.fromisoformat(row_data['upload_timestamp'].replace('Z', '+00:00'))
-        except (ValueError, TypeError):
-            errors.append("Invalid upload_timestamp format. Expected ISO format")
-
+                    
     return len(errors) == 0, errors
 
 def validate_budget_rows(rows: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:

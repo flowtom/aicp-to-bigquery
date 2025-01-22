@@ -37,4 +37,5 @@ config/service-account-key.json
 service-account-key.json
 config.json
 __pycache__/
-*.pyc 
+*.pyc output/
+output/
