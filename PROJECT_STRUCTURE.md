@@ -2,124 +2,106 @@
 
 ```
 budget-sync/
-├── config/                          # Configuration files
-│   ├── __init__.py
-│   ├── config.json                  # Main configuration file
-│   └── .gitkeep                     # Placeholder (service account key should not be committed)
+├── Dockerfile                      # Container configuration
+├── PROJECT_STRUCTURE.md           # This file - project structure documentation
+├── README.md                      # Project overview and setup instructions
 │
-├── src/                            # Source code
-│   ├── __init__.py
-│   │
-│   ├── api/                        # API related code
-│   │   ├── __init__.py
-│   │   ├── routes.py              # API endpoints
-│   │   └── middleware.py          # API middleware
-│   │
-│   ├── models/                    # Data models and schemas
-│   │   ├── __init__.py
-│   │   └── schemas/              # JSON schemas
-│   │       ├── __init__.py
-│   │       ├── raw_schema.json
-│   │       ├── processed_schema.json
-│   │       └── budget_metadata_schema.json
-│   │
-│   ├── services/                  # Business logic
-│   │   ├── __init__.py
-│   │   ├── budget_processor.py    # Budget processing logic
-│   │   └── bigquery_service.py    # BigQuery interaction logic
-│   │
-│   └── utils/                     # Utility functions
-│       ├── __init__.py
-│       ├── config.py              # Configuration management
-│       ├── data_utils.py          # Data processing utilities
-│       ├── env.py                 # Environment variable management
-│       └── errors.py              # Custom exceptions
+├── config/                        # Configuration files
+│   ├── config.json               # Main configuration settings
+│   └── service-account-key.json  # Google service account credentials (not in git)
 │
-├── tests/                         # Test files
-│   ├── __init__.py
-│   ├── conftest.py               # Test configuration
-│   ├── test_data/               # Test data files
-│   │   └── sample_budget.xlsx
-│   ├── test_api/
-│   │   └── test_routes.py
-│   ├── test_services/
-│   │   └── test_budget_processor.py
-│   └── test_utils/
-│       └── test_data_utils.py
+├── output/                       # Processed budget output files
+│   ├── processed_budget_*.json   # Individual processed budgets with versioning
+│   └── version_tracking.json     # Tracks version history of processed budgets
 │
-├── scripts/                       # Utility scripts
-│   ├── setup_bigquery.py         # BigQuery setup script
-│   └── generate_schemas.py        # Schema generation script
-│
-├── .env.example                   # Example environment variables
-├── .gitignore                    # Git ignore file
-├── Dockerfile                    # Docker configuration
-├── docker-compose.yml            # Docker compose configuration
+├── poetry.lock                   # Poetry dependency lock file
 ├── pyproject.toml               # Project metadata and dependencies
-├── README.md                    # Project documentation
-└── setup.py                     # Package setup file
+├── pytest.ini                   # PyTest configuration
+├── requirements.txt             # Direct pip dependencies
+│
+├── src/                         # Source code
+│   └── budget_sync/            # Main package
+│       ├── api/                # API components
+│       │   ├── __init__.py
+│       │   └── routes.py       # API endpoints and request handling
+│       │
+│       ├── constants/          # Constant values and mappings
+│       │   └── cover_sheet_mappings.py  # Cover sheet cell mappings
+│       │
+│       ├── models/            # Data models and schemas
+│       │   ├── budget.py     # Core budget data structures
+│       │   └── schemas/      # JSON validation schemas
+│       │       ├── budget_metadata_schema.json
+│       │       ├── processed_schema.json
+│       │       └── raw_schema.json
+│       │
+│       ├── scripts/          # Utility and test scripts
+│       │   ├── process_budget.py          # Main processing script
+│       │   ├── test_cover_sheet_processor.py  # Cover sheet testing
+│       │   └── test_run.py                # Development testing utility
+│       │
+│       ├── services/         # Core business logic
+│       │   ├── __init__.py
+│       │   └── budget_processor.py  # Main budget processing logic
+│       │
+│       └── utils/           # Utility functions
+│           ├── data_utils.py       # Data processing utilities
+│           └── data_validation.py  # Validation functions
+│
+└── tests/                    # Test suite
+    ├── conftest.py          # Test configuration and fixtures
+    ├── fixtures/            # Test data
+    │   ├── sample_budget.csv
+    │   ├── test_budget_data.json
+    │   └── test_credentials.json
+    │
+    ├── test_api/           # API tests
+    │   └── __init__.py
+    │
+    ├── test_services/      # Service layer tests
+    │   └── test_budget_processor.py
+    │
+    └── test_utils/        # Utility function tests
+        ├── test_budget_validation.py
+        └── test_data_utils.py
 ```
 
-## Key Directories and Files
+## Key Components
 
-### `/config`
-- Configuration files
-- Service account credentials (not committed to git)
-- Environment-specific settings
-
-### `/src`
-Main source code directory with modular organization:
-
-#### `/src/api`
-- REST API implementation
-- Route handlers
-- Middleware
-
-#### `/src/models`
-- Data schemas
-- Data validation
-- Type definitions
-
-#### `/src/services`
-- Core business logic
-- External service integrations
-- Data processing
-
-#### `/src/utils`
-- Helper functions
-- Common utilities
-- Error handling
-
-### `/tests`
-- Unit tests
-- Integration tests
-- Test data and fixtures
-
-### `/scripts`
-- Development utilities
-- Database setup
-- Schema management
-
-## Key Files
-
-### Configuration Files
+### Configuration
+- `config/`: Contains configuration files and credentials
 - `pyproject.toml`: Project dependencies and metadata
-- `Dockerfile`: Container configuration
-- `.env.example`: Template for environment variables
+- `pytest.ini`: Test configuration
 
-### Documentation
-- `README.md`: Project overview and setup instructions
-- `PROJECT_STRUCTURE.md`: This file, explaining the project organization
+### Source Code (`src/budget_sync/`)
+- `api/`: REST API implementation
+- `constants/`: System-wide constants and mappings
+- `models/`: Data structures and schemas
+- `scripts/`: Utility and test scripts
+- `services/`: Core business logic
+- `utils/`: Helper functions
 
-### Setup
-- `setup.py`: Package installation
-- `requirements.txt`: (Optional) Direct pip dependencies
+### Testing (`tests/`)
+- Organized by component (api, services, utils)
+- Includes fixtures and sample data
+- Comprehensive test coverage
 
-## Environment Variables
-Create a `.env` file based on `.env.example` with:
-```
-PROJECT_ID=your-project-id
-GOOGLE_APPLICATION_CREDENTIALS=config/service-account-key.json
-FLASK_ENV=development
-FLASK_APP=src/api/routes.py
-``` 
+### Output
+- `output/`: Contains processed budgets
+- Uses semantic versioning (MAJOR.MINOR.PATCH)
+- Maintains version history
+
+## File Naming Conventions
+
+### Processed Budgets
+Format: `processed_budget_[FILENAME]_[VERSION].json`
+Example: `processed_budget_GOOG0324PIXELDR_Estimate-Brand_DR_Combined-01-22-25_1.0.76.json`
+
+Components:
+- Project identifier (e.g., GOOG0324PIXELDR)
+- Sheet name (e.g., Estimate-Brand_DR_Combined)
+- Date (e.g., 01-22-25)
+- Version number (e.g., 1.0.76)
+
+### Version Tracking
+`version_tracking.json`: Maintains history of all processed versions 

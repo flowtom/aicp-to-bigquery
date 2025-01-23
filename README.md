@@ -1,124 +1,173 @@
 # Budget Sync
 
-A tool for processing and syncing AICP budget data with BigQuery.
+A tool for processing AICP (Association of Independent Commercial Producers) budgets from Google Sheets into a standardized JSON format.
 
-## Setup
+## Core Functionality
 
-1. Install dependencies:
+This tool transforms unstructured AICP budget data from Google Sheets into a standardized, validated JSON format that can be:
+- Easily analyzed
+- Tracked for changes
+- Validated for accuracy
+- Used by other systems (like BigQuery)
 
+### Input
+- Google Sheet containing AICP budget data
+- Structured with budget classes A through P
+- Contains estimates and actuals for budget line items
+
+### Output
+- Standardized JSON files with processed budget data
+- Version tracking information
+- Processing metadata
+
+## Prerequisites
+- Python 3.8 or higher
+- Google Sheets API access
+- Google Cloud service account
+- Basic understanding of AICP budget structure
+
+## Getting Started
+
+1. **Clone the Repository**
+```bash
+git clone [repository-url]
+cd budget-sync
+```
+
+2. **Set Up Virtual Environment**
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. **Install Dependencies**
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Configure:
-- Place your service account key in `config/service-account-key.json`
-- Update project settings in `config/config.json`
+4. **Configure Google Sheets Access**
+- Create a Google Cloud Project
+- Enable Google Sheets API
+- Create a service account
+- Download service account key to `config/service-account-key.json`
+- Share your Google Sheet with the service account email
 
-## Components
-
-### budget_processor.py
-
-The core service that handles reading and processing budget data from Google Sheets. Key features:
-- Maps and processes 16 different budget classes (A through P)
-- Handles various data formats including days, hours, rates, and totals
-- Validates line items and tracks validation issues
-- Supports batch processing to handle API rate limits
-- Maintains version tracking for processed files
-
-### process_budget.py
-
-The script that orchestrates the budget processing workflow:
-- Reads configuration settings
-- Initializes the budget processor service
-- Processes the specified spreadsheet
-- Saves results to JSON files with versioned output names
-- Provides detailed logging of the processing steps
-
-### budget.py
-
-The main application file that:
-- Sets up the Flask web server
-- Provides API endpoints for budget processing
-- Handles authentication and request validation
-- Manages the processing queue
-- Implements enhanced metadata tracking system
-
-## Metadata System
-
-The budget processing system includes comprehensive metadata tracking:
-
-### Core Metadata Fields
-- `version_id`: Unique identifier for each budget version
-- `previous_version_id`: Reference to previous version (if any)
-- `creation_timestamp`: When the budget was first created
-- `last_modified_timestamp`: Last modification time
-- `modified_by`: User who made the last modification
-- `status`: Current status (draft/review/approved)
-
-### Tracking Features
-- **Approval Chain**: Tracks the approval workflow
-- **Change Log**: Detailed history of modifications
-- **Validation Status**: Current validation state and issues
-- **Source Information**: Original data source details
-- **Processing Statistics**: Performance and processing metrics
-
-### Example Metadata Structure
+5. **Configure the Project**
+Create `config/config.json`:
 ```json
 {
-  "version_id": "GOOG0324PIXELDR_v2",
-  "previous_version_id": "GOOG0324PIXELDR_v1",
-  "creation_timestamp": "2024-01-22T10:30:00Z",
-  "last_modified_timestamp": "2024-01-22T15:45:00Z",
-  "modified_by": "john.doe@agency.com",
-  "status": "review",
-  "approval_chain": [
-    {
-      "step": "initial_review",
-      "approver": "jane.smith@agency.com",
-      "timestamp": "2024-01-22T16:00:00Z",
-      "status": "approved"
-    }
-  ],
-  "change_log": [
-    {
-      "timestamp": "2024-01-22T15:45:00Z",
-      "type": "update",
-      "details": {
-        "class": "A",
-        "field": "estimate_total",
-        "old_value": "50000",
-        "new_value": "55000"
-      }
-    }
-  ]
+  "project_id": "your-project-id",
+  "spreadsheet_id": "your-spreadsheet-id",
+  "sheet_gid": "your-sheet-gid"
 }
 ```
 
+## Development Guide
+
+### Adding New Features
+1. Create a new branch
+2. Update relevant components
+3. Add tests
+4. Update documentation
+5. Submit pull request
+
+### Testing
+Run tests:
+```bash
+pytest tests/
+```
+
+Run development test script:
+```bash
+python src/budget_sync/scripts/test_run.py
+```
+
+### Common Issues
+
+1. **Authentication Errors**
+```
+google.auth.exceptions.DefaultCredentialsError
+```
+Solution: Check service account key path and permissions
+
+2. **Sheet Access Errors**
+```
+googleapiclient.errors.HttpError: 404
+```
+Solution: Verify spreadsheet ID and sharing permissions
+
+3. **Processing Errors**
+```
+KeyError: 'class_code_cell'
+```
+Solution: Verify sheet structure matches expected format
+
+## Contributing
+1. Fork the repository
+2. Create feature branch
+3. Commit changes
+4. Push to branch
+5. Create pull request
+
+## Components
+
+### services/budget_processor.py
+
+The core service that processes AICP budgets:
+
+1. **Class Mappings**
+   - Maps 16 budget classes (A through P)
+   - Defines cell locations for each class:
+     - Class code/name locations
+     - Line item ranges
+     - Column mappings for estimates/actuals
+     - Subtotal cells
+     - P&W (Payroll & Wrap) cells
+     - Total cells
+
+2. **Processing Functions**
+   - `process_sheet`: Processes entire budget
+   - `_process_class`: Handles individual classes
+   - `_process_line_item`: Processes line items
+   - `_process_cover_sheet`: Extracts cover sheet data
+
+3. **Data Validation**
+   - Validates line items
+   - Checks required fields
+   - Validates rates and days
+   - Logs validation messages
+
+### models/budget.py
+
+Core data models that define the structure of:
+- Budget line items (with estimates and actuals)
+- Budget classes (A through P)
+- Validation results
+- Complete AICP budget structure
+
+### api/routes.py
+
+Web service that:
+- Provides API endpoints for budget processing
+- Handles file uploads and validation
+- Returns processed JSON data
+
+### scripts/test_run.py
+
+Development utility script that:
+- Tests the budget processor with sample data
+- Uses test metadata and configuration
+- Outputs timestamped results
+- Logs processing statistics and validation errors
+
 ## Version Control System
 
-The budget processing system uses semantic versioning (MAJOR.MINOR.PATCH) to track changes:
+Uses semantic versioning (MAJOR.MINOR.PATCH):
+- **MAJOR** (X.0.0): Sheet name changes
+- **MINOR** (0.X.0): Budget content changes
+- **PATCH** (0.0.X): Reprocessing unchanged content
 
-### Version Numbers
-- **MAJOR** (X.0.0): Increments when the sheet name changes
-  - Example: "Brand & DR Combined" → "Brand DR Combined" triggers 1.0.1 → 2.0.1
-- **MINOR** (0.X.0): Increments when the budget content changes but sheet name remains same
-  - Example: Line item updates trigger 1.0.1 → 1.1.1
-- **PATCH** (0.0.X): Increments when processing the same unchanged content
-  - Example: Reprocessing without changes triggers 1.0.1 → 1.0.2
-
-### Version Progression Examples
-```
-Initial processing of "Brand & DR Combined"     → 1.0.1
-Process again (no changes)                      → 1.0.2
-Process with budget changes                     → 1.1.1
-Process again (no changes)                      → 1.1.2
-Sheet renamed to "Brand DR Combined"            → 2.0.1
-Process again (no changes)                      → 2.0.2
-Process with budget changes                     → 2.1.1
-```
-
-### Version Tracking
-Versions are tracked in `output/version_tracking.json`:
+### Version Tracking Example
 ```json
 {
   "GOOG0324PIXELDR_Estimate-Brand_DR_Combined": {
@@ -126,8 +175,22 @@ Versions are tracked in `output/version_tracking.json`:
     "minor_version": 1,
     "patch_version": 2,
     "first_seen": "01-17-25",
-    "last_updated": "01-22-25",
-    "last_data_hash": "hash_of_current_data"
+    "last_updated": "01-22-25"
+  }
+}
+```
+
+## Metadata
+
+Each processed budget includes metadata:
+```json
+{
+  "project_info": {
+    "name": "GOOG0324PIXELDR_Estimate",
+    "sheet": "Brand & DR Combined",
+    "version": "1.0.73",
+    "source_url": "https://docs.google.com/spreadsheets/d/[SHEET_ID]/edit#gid=[GID]",
+    "processed_at": "2024-01-22T15:30:45.123456"
   }
 }
 ```
@@ -141,13 +204,12 @@ python src/scripts/process_budget.py
 
 2. Run the web service:
 ```bash
-python app.py
+python src/budget_sync/api/routes.py
 ```
 
-3. Access the API at `http://localhost:5000/api/v1/budget`
+3. Access the API at `http://localhost:8080/process-budget`
 
-## Output
+## Output Files
 
-The processed budget data is saved to:
-- `output/processed_budget_[FILENAME]_[DATE]_[VERSION].json` - Contains the processed line items and metadata
-- `output/version_tracking.json` - Tracks processing versions for each file
+- `output/processed_budget_[FILENAME]_[VERSION].json` - Processed budget data
+- `output/version_tracking.json` - Version history
