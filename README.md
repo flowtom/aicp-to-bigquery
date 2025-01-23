@@ -94,6 +94,44 @@ The budget processing system includes comprehensive metadata tracking:
 }
 ```
 
+## Version Control System
+
+The budget processing system uses semantic versioning (MAJOR.MINOR.PATCH) to track changes:
+
+### Version Numbers
+- **MAJOR** (X.0.0): Increments when the sheet name changes
+  - Example: "Brand & DR Combined" → "Brand DR Combined" triggers 1.0.1 → 2.0.1
+- **MINOR** (0.X.0): Increments when the budget content changes but sheet name remains same
+  - Example: Line item updates trigger 1.0.1 → 1.1.1
+- **PATCH** (0.0.X): Increments when processing the same unchanged content
+  - Example: Reprocessing without changes triggers 1.0.1 → 1.0.2
+
+### Version Progression Examples
+```
+Initial processing of "Brand & DR Combined"     → 1.0.1
+Process again (no changes)                      → 1.0.2
+Process with budget changes                     → 1.1.1
+Process again (no changes)                      → 1.1.2
+Sheet renamed to "Brand DR Combined"            → 2.0.1
+Process again (no changes)                      → 2.0.2
+Process with budget changes                     → 2.1.1
+```
+
+### Version Tracking
+Versions are tracked in `output/version_tracking.json`:
+```json
+{
+  "GOOG0324PIXELDR_Estimate-Brand_DR_Combined": {
+    "major_version": 1,
+    "minor_version": 1,
+    "patch_version": 2,
+    "first_seen": "01-17-25",
+    "last_updated": "01-22-25",
+    "last_data_hash": "hash_of_current_data"
+  }
+}
+```
+
 ## Running
 
 1. Process a budget spreadsheet:
