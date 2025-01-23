@@ -1,3 +1,9 @@
+# Credentials and secrets
+config/service-account-key.json
+config/bigquery-service-account-key.json
+config/*.json
+.env
+
 # Python
 __pycache__/
 *.py[cod]
@@ -25,6 +31,7 @@ venv/
 ENV/
 env/
 .env
+.venv/
 
 # IDE
 .idea/
@@ -39,3 +46,8 @@ config.json
 __pycache__/
 *.pyc output/
 output/
+*.log
+
+# Credentials and secrets
+config/*-service-account-key.json
+config/*.json
