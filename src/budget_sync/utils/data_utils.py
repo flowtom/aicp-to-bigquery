@@ -18,6 +18,7 @@ def safe_float_convert(value: Any) -> Optional[float]:
     - Currency strings (e.g., '$1,234.56')
     - Numbers with commas (e.g., '1,234.56')
     - Percentage strings (e.g., '28%')
+    - Negative numbers in parentheses (e.g., '($1,234.56)')
     - Special values ('#N/A', '', None)
     """
     if value is None or value == '' or value == '#N/A':
@@ -37,8 +38,14 @@ def safe_float_convert(value: Any) -> Optional[float]:
         if cleaned == '0.00' or cleaned == '0':
             return 0.0
             
+        # Handle parentheses notation for negative numbers
+        is_negative = cleaned.startswith('(') and cleaned.endswith(')')
+        if is_negative:
+            cleaned = cleaned[1:-1]  # Remove parentheses
+            
         try:
-            return float(cleaned)
+            result = float(cleaned)
+            return -result if is_negative else result
         except ValueError:
             return None
             

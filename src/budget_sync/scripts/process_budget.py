@@ -128,8 +128,19 @@ def _parse_number(value: Any) -> float:
     if str_value.endswith('%'):
         return float(str_value.rstrip('%')) / 100.0
         
-    # Handle currency
-    return float(str_value.replace('$', '').replace(',', '') or 0)
+    # Handle parentheses notation for negative numbers
+    is_negative = str_value.startswith('(') and str_value.endswith(')')
+    if is_negative:
+        str_value = str_value[1:-1]  # Remove parentheses
+        
+    # Handle currency and clean up
+    cleaned = str_value.replace('$', '').replace(',', '')
+    
+    try:
+        result = float(cleaned or 0)
+        return -result if is_negative else result
+    except ValueError:
+        return 0.0
 
 def prepare_detail_records(rows: list, metadata: dict, version_hash: str) -> list:
     """Prepare budget detail records from processed rows."""
