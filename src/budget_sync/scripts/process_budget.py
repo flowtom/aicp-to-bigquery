@@ -52,6 +52,9 @@ def main():
         # Generate output filename
         output_filename = f"output/processed_budget_{metadata['upload_info']['id']}.json"
         
+        # Ensure output directory exists
+        Path('output').mkdir(parents=True, exist_ok=True)
+        
         # Save results
         with open(output_filename, 'w') as f:
             json.dump({
@@ -61,6 +64,7 @@ def main():
             
         # Log summary
         logging.info(f"\nFull results saved to: {output_filename}")
+        logging.info(f"Version: {metadata['upload_info']['version']}")
         logging.info(f"\nFirst few processed rows:")
         for row in processed_rows[:3]:
             logging.info(json.dumps(row, indent=2))

@@ -606,6 +606,20 @@ class BudgetProcessor:
             key = f"{file_name}-{sheet_name}"
             current_hash = hash(str(current_data))
             
+            # Handle old format migration
+            if key in tracking_data and isinstance(tracking_data[key], dict):
+                if "current_increment" in tracking_data[key]:
+                    # Convert old increment to semantic version
+                    old_increment = tracking_data[key]["current_increment"]
+                    tracking_data[key] = {
+                        'major_version': 1,
+                        'minor_version': 0,
+                        'patch_version': old_increment,
+                        'first_seen': tracking_data[key].get('first_seen', date_str),
+                        'last_updated': date_str,
+                        'last_data_hash': current_hash
+                    }
+            
             # If new combination, start at version 1.0.1
             if key not in tracking_data:
                 previous_versions = [k for k in tracking_data.keys() 
@@ -656,28 +670,11 @@ class BudgetProcessor:
         # Generate date string
         date_str = datetime.now().strftime('%m-%d-%y')
         
-        # Get increment number
-        increment = self._get_increment_number(clean_file, clean_sheet, date_str)
+        # Get version numbers
+        major, minor, patch = self._get_version_numbers(clean_file, clean_sheet, date_str, {})
+        version_str = f"{major}.{minor}.{patch}"
         
-        return f"{clean_file}-{clean_sheet}-{date_str}_{increment}"
-
-    def _get_increment_number(self, clean_file: str, clean_sheet: str, date_str: str) -> int:
-        """
-        Get an increment number for the given file and sheet combination.
-        This ensures unique IDs when multiple uploads happen on the same day.
-        
-        Args:
-            clean_file (str): Cleaned file name
-            clean_sheet (str): Cleaned sheet name
-            date_str (str): Date string in YYYYMMDD format
-            
-        Returns:
-            int: Increment number for this file/sheet/date combination
-        """
-        # For now, just return 1 as we don't have persistence to track increments
-        # In a production system, this would need to query a database or storage
-        # to ensure truly unique increments across multiple runs
-        return 1
+        return f"{clean_file}-{clean_sheet}-{date_str}_{version_str}"
 
     def _get_class_totals(self, spreadsheet_id: str, sheet_title: str, mapping: Dict) -> Dict:
         """Get class totals using batch request."""
@@ -1053,7 +1050,7 @@ class BudgetProcessor:
                     # Add rate limiting pause every 3 classes
                     if processed_class_count > 0 and processed_class_count % 3 == 0:
                         logger.info("Pausing for rate limiting after processing 3 classes...")
-                        time.sleep(30)  # Wait 30 seconds to stay under the per-minute limit
+                        time.sleep(15)  # Wait 15 seconds to stay under the per-minute limit
                     
                     # Process class
                     class_rows = self._process_class(spreadsheet_id, sheet_title, class_code, mapping)
@@ -1064,14 +1061,26 @@ class BudgetProcessor:
                     logger.error(f"Error processing class {class_code}: {str(e)}")
                     continue
             
+            # Get version info
+            clean_file = '_'.join(''.join(c if c.isalnum() else ' ' for c in sheet_info['spreadsheet_title']).split())
+            clean_sheet = '_'.join(''.join(c if c.isalnum() else ' ' for c in sheet_title).split())
+            date_str = datetime.now().strftime('%m-%d-%y')
+            
+            # Get version numbers
+            major, minor, patch = self._get_version_numbers(clean_file, clean_sheet, date_str, {})
+            version_str = f"{major}.{minor}.{patch}"
+            
             # Generate metadata with reorganized structure
             metadata = {
                 'upload_info': {
-                    'id': self._generate_upload_id(sheet_info['spreadsheet_title'], sheet_title),
+                    'id': f"{clean_file}-{clean_sheet}-{date_str}_{version_str}",
                     'spreadsheet_id': spreadsheet_id,
                     'sheet_title': sheet_title,
                     'sheet_gid': sheet_info['gid'],
-                    'timestamp': datetime.now().isoformat()
+                    'timestamp': datetime.now().isoformat(),
+                    'version': version_str,
+                    'first_seen': self._get_first_seen_date(clean_file, clean_sheet),
+                    'last_updated': date_str
                 },
                 'metadata': {
                     'project_info': cover_sheet_data['project_summary']['project_info'],
@@ -1091,6 +1100,19 @@ class BudgetProcessor:
         except Exception as e:
             logger.error(f"Error processing sheet: {str(e)}")
             raise
+
+    def _get_first_seen_date(self, clean_file: str, clean_sheet: str) -> str:
+        """Get the first seen date for a file/sheet combination."""
+        try:
+            with open('output/version_tracking.json', 'r') as f:
+                tracking_data = json.load(f)
+                
+            key = f"{clean_file}-{clean_sheet}"
+            if key in tracking_data:
+                return tracking_data[key].get('first_seen', datetime.now().strftime('%m-%d-%y'))
+            return datetime.now().strftime('%m-%d-%y')
+        except:
+            return datetime.now().strftime('%m-%d-%y')
 
     def _get_range_values(self, spreadsheet_id: str, range_name: str) -> list:
         """Fetch values for a specific range with retry logic."""
