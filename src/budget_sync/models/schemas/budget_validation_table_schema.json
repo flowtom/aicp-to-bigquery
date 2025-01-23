@@ -1,0 +1,80 @@
+[
+    {
+        "name": "budget_id",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "Foreign key to budget table"
+    },
+    {
+        "name": "project_id",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "Foreign key to projects table"
+    },
+    {
+        "name": "validation_id",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "Unique identifier for this validation record"
+    },
+    {
+        "name": "upload_timestamp",
+        "type": "TIMESTAMP",
+        "mode": "REQUIRED",
+        "description": "When the budget version being validated was uploaded"
+    },
+    {
+        "name": "validation_timestamp",
+        "type": "TIMESTAMP",
+        "mode": "REQUIRED",
+        "description": "When this validation was performed"
+    },
+    {
+        "name": "validation_type",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "Type of validation (cover_sheet, line_item, class_total, etc)"
+    },
+    {
+        "name": "severity",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "Severity level (info, warning, error)"
+    },
+    {
+        "name": "message",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "Validation message"
+    },
+    {
+        "name": "class_code",
+        "type": "STRING",
+        "mode": "NULLABLE",
+        "description": "Related budget class code if applicable"
+    },
+    {
+        "name": "line_item_id",
+        "type": "STRING",
+        "mode": "NULLABLE",
+        "description": "Related line item ID if applicable"
+    },
+    {
+        "name": "field_name",
+        "type": "STRING",
+        "mode": "NULLABLE",
+        "description": "Name of the field with the validation issue"
+    },
+    {
+        "name": "expected_value",
+        "type": "STRING",
+        "mode": "NULLABLE",
+        "description": "Expected value if applicable"
+    },
+    {
+        "name": "actual_value",
+        "type": "STRING",
+        "mode": "NULLABLE",
+        "description": "Actual value if applicable"
+    }
+] 

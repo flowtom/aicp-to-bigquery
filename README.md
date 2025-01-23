@@ -19,11 +19,13 @@ This tool transforms unstructured AICP budget data from Google Sheets into a sta
 - Standardized JSON files with processed budget data
 - Version tracking information
 - Processing metadata
+- BigQuery tables for analytics
 
 ## Prerequisites
 - Python 3.8 or higher
 - Google Sheets API access
 - Google Cloud service account
+- BigQuery project and dataset
 - Basic understanding of AICP budget structure
 
 ## Getting Started
@@ -45,22 +47,57 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. **Configure Google Sheets Access**
+4. **Configure Google Sheets and BigQuery Access**
 - Create a Google Cloud Project
-- Enable Google Sheets API
-- Create a service account
+- Enable Google Sheets API and BigQuery API
+- Create a service account with necessary permissions:
+  - Google Sheets API (roles/sheets.reader)
+  - BigQuery Data Editor (roles/bigquery.dataEditor)
 - Download service account key to `config/service-account-key.json`
 - Share your Google Sheet with the service account email
 
-5. **Configure the Project**
-Create `config/config.json`:
-```json
-{
-  "project_id": "your-project-id",
-  "spreadsheet_id": "your-spreadsheet-id",
-  "sheet_gid": "your-sheet-gid"
-}
+5. **Configure Environment Variables**
+Create `.env` file in the project root:
+```bash
+# Google Sheets Configuration
+BUDGET_SPREADSHEET_ID=your-spreadsheet-id
+BUDGET_SHEET_GID=your-sheet-gid
+GOOGLE_APPLICATION_CREDENTIALS=config/service-account-key.json
+
+# BigQuery Configuration
+BIGQUERY_PROJECT_ID=your-bigquery-project-id
+BIGQUERY_DATASET_ID=budget_data
+
+# User Configuration
+USER_EMAIL=your.email@example.com
+VERSION_NOTES="Initial version"  # Optional
 ```
+
+## Running the Script
+
+1. **Process a budget and sync to BigQuery:**
+```bash
+python src/budget_sync/scripts/process_budget.py
+```
+
+The script will:
+- Process the budget spreadsheet
+- Create/update project record
+- Upload budget data
+- Upload line item details
+- Save validation results
+- Generate local JSON output
+
+## Output
+
+1. **Local Files**
+- `output/processed_budget_[ID].json` - Processed budget data and metadata
+
+2. **BigQuery Tables**
+- `projects` - Core project information
+- `budgets` - Budget versions and cover sheet data
+- `budget_details` - Line item details
+- `budget_validations` - Validation results
 
 ## Development Guide
 
@@ -77,37 +114,25 @@ Run tests:
 pytest tests/
 ```
 
-Run development test script:
-```bash
-python src/budget_sync/scripts/test_run.py
-```
-
 ### Common Issues
 
 1. **Authentication Errors**
 ```
 google.auth.exceptions.DefaultCredentialsError
 ```
-Solution: Check service account key path and permissions
+Solution: Check service account key path in GOOGLE_APPLICATION_CREDENTIALS
 
 2. **Sheet Access Errors**
 ```
 googleapiclient.errors.HttpError: 404
 ```
-Solution: Verify spreadsheet ID and sharing permissions
+Solution: Verify BUDGET_SPREADSHEET_ID and sharing permissions
 
-3. **Processing Errors**
+3. **BigQuery Errors**
 ```
-KeyError: 'class_code_cell'
+google.api_core.exceptions.NotFound
 ```
-Solution: Verify sheet structure matches expected format
-
-## Contributing
-1. Fork the repository
-2. Create feature branch
-3. Commit changes
-4. Push to branch
-5. Create pull request
+Solution: Verify BIGQUERY_PROJECT_ID and BIGQUERY_DATASET_ID
 
 ## Components
 
@@ -213,3 +238,68 @@ python src/budget_sync/api/routes.py
 
 - `output/processed_budget_[FILENAME]_[VERSION].json` - Processed budget data
 - `output/version_tracking.json` - Version history
+
+## BigQuery Setup
+
+### 1. Create Google Cloud Project
+```bash
+# Create new project
+gcloud projects create budget-sync-db-dev
+
+# Set as default project
+gcloud config set project budget-sync-db-dev
+
+# Enable BigQuery API
+gcloud services enable bigquery.googleapis.com
+```
+
+### 2. Create Service Account
+```bash
+# Create service account
+gcloud iam service-accounts create budget-sync-sa \
+    --display-name="Budget Sync Service Account"
+
+# Grant BigQuery permissions
+gcloud projects add-iam-policy-binding budget-sync-db-dev \
+    --member="serviceAccount:budget-sync-sa@budget-sync-db-dev.iam.gserviceaccount.com" \
+    --role="roles/bigquery.dataEditor" \
+    --condition=None
+
+# Download service account key
+gcloud iam service-accounts keys create config/bigquery-service-account-key.json \
+    --iam-account=budget-sync-sa@budget-sync-db-dev.iam.gserviceaccount.com
+```
+
+### 3. Create BigQuery Dataset
+```bash
+# Create dataset
+bq mk --dataset budget-sync-db:budget_data
+
+# Verify dataset creation
+bq ls
+```
+
+### 4. Configure Dataset Access
+The dataset ID for use in code will be: `budget-sync-db.budget_data`
+
+### Alternative Setup via Google Cloud Console
+1. **Create Project**
+   - Go to Google Cloud Console
+   - Click "New Project"
+   - Enter project name and ID
+
+2. **Create Service Account**
+   - Go to IAM & Admin > Service Accounts
+   - Click "CREATE SERVICE ACCOUNT"
+   - Add "BigQuery Data Editor" role
+
+3. **Create Dataset**
+   - Go to BigQuery UI
+   - Click on your project
+   - Click "CREATE DATASET"
+   - Enter dataset ID: `budget_data`
+
+4. **Download Credentials**
+   - Go to service account details
+   - Create new key (JSON)
+   - Save as `config/bigquery-service-account-key.json`
