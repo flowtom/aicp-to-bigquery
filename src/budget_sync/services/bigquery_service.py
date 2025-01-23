@@ -1,13 +1,14 @@
 """
 Service for handling BigQuery operations.
 """
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 from google.cloud import bigquery
 from google.api_core import retry
 from datetime import datetime
 import json
 from pathlib import Path
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,8 @@ class BigQueryService:
         """Initialize BigQuery client with project and dataset."""
         self.project_id = project_id
         self.dataset_id = dataset_id
+        
+        # Initialize client with just the project ID
         self.client = bigquery.Client(project=project_id)
         
         # Ensure dataset exists
@@ -29,11 +32,11 @@ class BigQueryService:
         self.budget_detail_schema = self._load_schema('budget_detail_table_schema.json')
         self.validation_schema = self._load_schema('budget_validation_table_schema.json')
         
-        # Table references
-        self.projects_table_id = f"{project_id}.{dataset_id}.projects"
-        self.budget_table_id = f"{project_id}.{dataset_id}.budgets"
-        self.budget_detail_table_id = f"{project_id}.{dataset_id}.budget_details"
-        self.validation_table_id = f"{project_id}.{dataset_id}.budget_validations"
+        # Table references - use fully qualified IDs
+        self.projects_table_id = f"{self.project_id}.{self.dataset_id}.projects"
+        self.budget_table_id = f"{self.project_id}.{self.dataset_id}.budgets"
+        self.budget_detail_table_id = f"{self.project_id}.{self.dataset_id}.budget_details"
+        self.validation_table_id = f"{self.project_id}.{self.dataset_id}.budget_validations"
         
         # Ensure tables exist
         self._ensure_tables_exist()
@@ -59,6 +62,28 @@ class BigQueryService:
             logger.error(f"Error ensuring dataset exists: {str(e)}")
             raise
     
+    def _recreate_table(self, table_id: str, schema: List[bigquery.SchemaField], time_partition_field: Optional[str] = None) -> None:
+        """Delete and recreate a table with the given schema."""
+        try:
+            # Use fully qualified table ID
+            if '.' not in table_id:
+                table_id = f"{self.project_id}.{self.dataset_id}.{table_id}"
+                
+            self.client.delete_table(table_id, not_found_ok=True)
+            logger.info(f"Deleted table {table_id}")
+            
+            table = bigquery.Table(table_id, schema=schema)
+            if time_partition_field:
+                table.time_partitioning = bigquery.TimePartitioning(
+                    type_=bigquery.TimePartitioningType.DAY,
+                    field=time_partition_field
+                )
+            self.client.create_table(table)
+            logger.info(f"Created table {table_id}")
+        except Exception as e:
+            logger.error(f"Error recreating table {table_id}: {str(e)}")
+            raise
+    
     def _ensure_tables_exist(self):
         """Create tables if they don't exist."""
         try:
@@ -70,16 +95,12 @@ class BigQueryService:
             self.client.create_table(projects_table, exists_ok=True)
             logger.info("Projects table is ready")
             
-            # Create budget table
-            budget_table = bigquery.Table(
-                self.budget_table_id,
-                schema=self._create_schema(self.budget_schema)
+            # Recreate budget table with updated schema
+            self._recreate_table(
+                self.budget_table_id,  # Use the full table ID
+                self._create_schema(self.budget_schema),
+                time_partition_field="upload_timestamp"
             )
-            budget_table.time_partitioning = bigquery.TimePartitioning(
-                type_=bigquery.TimePartitioningType.DAY,
-                field="upload_timestamp"
-            )
-            self.client.create_table(budget_table, exists_ok=True)
             logger.info("Budget table is ready")
             
             # Create budget detail table

@@ -12,6 +12,7 @@ from src.budget_sync.services.budget_processor import BudgetProcessor
 from src.budget_sync.services.bigquery_service import BigQueryService
 from dotenv import load_dotenv
 import sys
+from typing import Any
 
 # Configure logging for more detailed output
 logging.basicConfig(
@@ -29,41 +30,64 @@ def generate_version_hash(data: dict) -> str:
 
 def extract_project_info(metadata: dict) -> dict:
     """Extract project information from metadata."""
-    project_id = metadata['upload_info']['id'].split('_')[0]
+    # Get project info from metadata
     project_info = metadata['metadata']['project_info']
+    financials = metadata['metadata']['financials']['grand_total']
+    
+    # Generate a project ID using spreadsheet title if project title is empty
+    base_name = project_info['project_title'] or metadata['upload_info']['spreadsheet_title']
+    project_id = f"{base_name}_{datetime.now().strftime('%Y%m%d')}"
+    project_id = ''.join(c if c.isalnum() else '_' for c in project_id)
+    
+    # Get current timestamp in UTC
+    current_time = datetime.utcnow().isoformat()
     
     return {
         'project_id': project_id,
-        'job_name': project_info['project_title'],
+        'job_name': project_info['project_title'] or metadata['upload_info']['spreadsheet_title'],
         'client_name': project_info.get('client_name', ''),
         'production_company': project_info.get('production_company', ''),
-        'latest_budget_id': metadata['upload_info']['id'],
-        'latest_estimate_total': float(metadata['grand_total']['estimated'].replace('$', '').replace(',', '')),
-        'latest_actual_total': float(metadata['grand_total']['actual'].replace('$', '').replace(',', '')),
-        'latest_client_actual_total': float(metadata['grand_total']['client_actual'].replace('$', '').replace(',', '')),
-        'latest_variance': float(metadata['grand_total']['variance'].replace('$', '').replace(',', '')),
-        'latest_client_variance': float(metadata['grand_total']['client_variance'].replace('$', '').replace(',', '')),
-        'updated_at': datetime.utcnow().isoformat(),
+        'latest_budget_id': f"{project_id}_{datetime.now().strftime('%H%M%S')}",
+        'latest_estimate_total': float(financials['estimated'].replace('$', '').replace(',', '')),
+        'latest_actual_total': float(financials['actual'].replace('$', '').replace(',', '')),
+        'latest_client_actual_total': float(financials['client_actual'].replace('$', '').replace(',', '')),
+        'latest_variance': float(financials['variance'].replace('$', '').replace(',', '')),
+        'latest_client_variance': float(financials['client_variance'].replace('$', '').replace(',', '')),
+        'created_at': current_time,  # Add created_at timestamp
+        'updated_at': current_time,  # Add updated_at timestamp
         'status': 'active'
     }
 
 def prepare_budget_record(metadata: dict, version_hash: str) -> dict:
     """Prepare budget record from metadata."""
+    current_time = datetime.utcnow().isoformat()
+    project_info = metadata['metadata']['project_info']
+    project_date = project_info['date']
+    if not project_date:
+        # If no project date, use the upload date (just the date portion)
+        project_date = current_time.split('T')[0]
+
+    # Use same project ID generation logic as extract_project_info
+    base_name = project_info['project_title'] or metadata['upload_info']['spreadsheet_title']
+    project_id = f"{base_name}_{datetime.now().strftime('%Y%m%d')}"
+    project_id = ''.join(c if c.isalnum() else '_' for c in project_id)
+    budget_id = f"{project_id}_{datetime.now().strftime('%H%M%S')}"
+
     return {
-        'budget_id': metadata['upload_info']['id'],
-        'project_id': metadata['upload_info']['id'].split('_')[0],
-        'upload_timestamp': metadata['upload_info']['timestamp'],
+        'budget_id': budget_id,
+        'project_id': project_id,
+        'upload_timestamp': current_time,
         'version_hash': version_hash,
         'user_email': os.getenv('USER_EMAIL'),
-        'version_status': metadata.get('version_status', 'draft'),
-        'version_notes': metadata.get('version_notes', ''),
+        'version_status': 'draft',
+        'version_notes': os.getenv('VERSION_NOTES', ''),
         'spreadsheet_id': metadata['upload_info']['spreadsheet_id'],
         'sheet_name': metadata['upload_info']['sheet_title'],
         'sheet_gid': metadata['upload_info']['sheet_gid'],
-        'project_title': metadata['metadata']['project_info']['project_title'],
-        'production_company': metadata['metadata']['project_info'].get('production_company', ''),
-        'contact_phone': metadata['metadata']['project_info'].get('contact_phone', ''),
-        'project_date': metadata['metadata']['project_info'].get('date', ''),
+        'project_title': project_info['project_title'] or metadata['upload_info']['spreadsheet_title'],
+        'production_company': project_info.get('production_company', ''),
+        'contact_phone': project_info.get('contact_phone', ''),
+        'project_date': project_date,
         'director': metadata['metadata']['core_team'].get('director', ''),
         'producer': metadata['metadata']['core_team'].get('producer', ''),
         'writer': metadata['metadata']['core_team'].get('writer', ''),
@@ -81,53 +105,77 @@ def prepare_budget_record(metadata: dict, version_hash: str) -> dict:
             int(metadata['metadata']['timeline'].get('location_days', 0)),
             int(metadata['metadata']['timeline'].get('wrap_days', 0))
         ]),
-        'firm_bid_total_estimate': float(metadata['grand_total']['estimated'].replace('$', '').replace(',', '')),
-        'firm_bid_total_actual': float(metadata['grand_total']['actual'].replace('$', '').replace(',', '')),
+        'firm_bid_total_estimate': float(metadata['metadata']['financials']['grand_total']['estimated'].replace('$', '').replace(',', '')),
+        'firm_bid_total_actual': float(metadata['metadata']['financials']['grand_total']['actual'].replace('$', '').replace(',', '')),
         'cost_plus_total_estimate': 0.0,  # TODO: Add cost plus totals
         'cost_plus_total_actual': 0.0,
-        'grand_total_estimate': float(metadata['grand_total']['estimated'].replace('$', '').replace(',', '')),
-        'grand_total_actual': float(metadata['grand_total']['actual'].replace('$', '').replace(',', ''))
+        'grand_total_estimate': float(metadata['metadata']['financials']['grand_total']['estimated'].replace('$', '').replace(',', '')),
+        'grand_total_actual': float(metadata['metadata']['financials']['grand_total']['actual'].replace('$', '').replace(',', '')),
+        'grand_total_variance': float(metadata['metadata']['financials']['grand_total']['variance'].replace('$', '').replace(',', '')),
+        'client_total_actual': float(metadata['metadata']['financials']['grand_total']['client_actual'].replace('$', '').replace(',', '')),
+        'client_total_variance': float(metadata['metadata']['financials']['grand_total']['client_variance'].replace('$', '').replace(',', ''))
     }
 
+def _parse_number(value: Any) -> float:
+    """Parse a number from a string, handling currency and percentage formats."""
+    if not value:
+        return 0.0
+    
+    # Convert to string and clean up
+    str_value = str(value).strip()
+    
+    # Handle percentages
+    if str_value.endswith('%'):
+        return float(str_value.rstrip('%')) / 100.0
+        
+    # Handle currency
+    return float(str_value.replace('$', '').replace(',', '') or 0)
+
 def prepare_detail_records(rows: list, metadata: dict, version_hash: str) -> list:
-    """Prepare budget detail records."""
-    project_id = metadata['upload_info']['id'].split('_')[0]
-    budget_id = metadata['upload_info']['id']
-    upload_timestamp = metadata['upload_info']['timestamp']
+    """Prepare budget detail records from processed rows."""
+    current_time = datetime.utcnow().isoformat()
+    upload_timestamp = current_time
+    
+    # Use same project ID generation logic as extract_project_info
+    base_name = metadata['metadata']['project_info']['project_title'] or metadata['upload_info']['spreadsheet_title']
+    project_id = f"{base_name}_{datetime.now().strftime('%Y%m%d')}"
+    project_id = ''.join(c if c.isalnum() else '_' for c in project_id)
+    budget_id = f"{project_id}_{datetime.now().strftime('%H%M%S')}"
     
     detail_records = []
     for row in rows:
-        # Skip non-line items
-        if not row.get('line_item_number'):
+        if not row.get('class_code') or not row.get('line_item_number'):
             continue
             
+        line_item_id = f"{budget_id}_{row['class_code']}_{row['line_item_number']}"
+        
         detail_records.append({
             'budget_id': budget_id,
             'project_id': project_id,
-            'line_item_id': f"{budget_id}_{row['class_code']}_{row['line_item_number']}",
+            'line_item_id': line_item_id,
             'upload_timestamp': upload_timestamp,
-            'created_at': upload_timestamp,  # TODO: Track actual creation time
+            'created_at': current_time,  # TODO: Track actual creation time
             'class_code': row['class_code'],
             'class_name': row['class_name'],
-            'line_item_number': row['line_item_number'],
+            'line_item_number': int(row['line_item_number']),
             'line_item_description': row['line_item_description'],
-            'estimate_days': float(row.get('estimate_days', 0) or 0),
-            'estimate_rate': float(row.get('estimate_rate', 0) or 0),
-            'estimate_ot_rate': float(row.get('estimate_ot_rate', 0) or 0),
-            'estimate_ot_hours': float(row.get('estimate_ot_hours', 0) or 0),
-            'estimate_total': float(row.get('estimate_total', 0) or 0),
-            'calculated_estimate_total': float(row.get('calculated_estimate_total', 0) or 0),
-            'estimate_variance': float(row.get('estimate_variance', 0) or 0),
-            'actual_days': float(row.get('actual_days', 0) or 0),
-            'actual_rate': float(row.get('actual_rate', 0) or 0),
-            'actual_total': float(row.get('actual_total', 0) or 0),
-            'calculated_actual_total': float(row.get('calculated_actual_total', 0) or 0),
-            'actual_variance': float(row.get('actual_variance', 0) or 0),
-            'class_total_estimate': float(row.get('class_total_estimate', 0) or 0),
-            'class_total_actual': float(row.get('class_total_actual', 0) or 0),
-            'class_pnw_estimate': float(row.get('class_pnw_estimate', 0) or 0),
-            'class_pnw_actual': float(row.get('class_pnw_actual', 0) or 0),
-            'class_pnw_rate': float(row.get('class_pnw_rate', 0) or 0),
+            'estimate_days': _parse_number(row.get('estimate_days')),
+            'estimate_rate': _parse_number(row.get('estimate_rate')),
+            'estimate_ot_rate': _parse_number(row.get('estimate_ot_rate')),
+            'estimate_ot_hours': _parse_number(row.get('estimate_ot_hours')),
+            'estimate_total': _parse_number(row.get('estimate_total')),
+            'calculated_estimate_total': _parse_number(row.get('calculated_estimate_total')),
+            'estimate_variance': _parse_number(row.get('estimate_variance')),
+            'actual_days': _parse_number(row.get('actual_days')),
+            'actual_rate': _parse_number(row.get('actual_rate')),
+            'actual_total': _parse_number(row.get('actual_total')),
+            'calculated_actual_total': _parse_number(row.get('calculated_actual_total')),
+            'actual_variance': _parse_number(row.get('actual_variance')),
+            'class_total_estimate': _parse_number(row.get('class_total_estimate')),
+            'class_total_actual': _parse_number(row.get('class_total_actual')),
+            'class_pnw_estimate': _parse_number(row.get('class_pnw_estimate')),
+            'class_pnw_actual': _parse_number(row.get('class_pnw_actual')),
+            'class_pnw_rate': _parse_number(row.get('class_pnw_rate')),
             'notes': row.get('notes', ''),
             'is_subtotal': bool(row.get('is_subtotal', False))
         })
@@ -169,19 +217,22 @@ def main():
         # Get required environment variables
         spreadsheet_id = os.getenv('BUDGET_SPREADSHEET_ID')
         sheet_gid = os.getenv('BUDGET_SHEET_GID')
-        credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
         bq_project_id = os.getenv('BIGQUERY_PROJECT_ID')
         bq_dataset_id = os.getenv('BIGQUERY_DATASET_ID')
         
-        if not all([spreadsheet_id, credentials_path, bq_project_id, bq_dataset_id]):
+        if not all([spreadsheet_id, bq_project_id, bq_dataset_id]):
             raise ValueError("Missing required environment variables")
         
         # Initialize services
-        budget_processor = BudgetProcessor(credentials_path)
+        budget_processor = BudgetProcessor()  # Will read credentials from environment
         bigquery_service = BigQueryService(bq_project_id, bq_dataset_id)
         
         # Process budget data
-        metadata, processed_rows = budget_processor.process_budget(spreadsheet_id, sheet_gid)
+        processed_rows, metadata = budget_processor.process_budget(spreadsheet_id, sheet_gid)  # Fixed order
+        
+        # Debug log the metadata structure
+        logger.info("Metadata structure:")
+        logger.info(json.dumps(metadata, indent=2))
         
         # Generate version hash
         version_hash = generate_version_hash({

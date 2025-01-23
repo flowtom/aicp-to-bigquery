@@ -9,6 +9,7 @@ from pathlib import Path
 import json
 from typing import Dict, List, Any, Optional, Tuple
 import time
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -574,9 +575,15 @@ class BudgetProcessor:
         }
     }
     
-    def __init__(self, credentials_path: str):
+    def __init__(self, credentials_path: str = None):
         """Initialize with Google Sheets credentials."""
         try:
+            # Use provided path or fall back to environment variable
+            if not credentials_path:
+                credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+            if not credentials_path:
+                raise ValueError("No credentials path provided and GOOGLE_APPLICATION_CREDENTIALS not set")
+                
             logger.info(f"Loading credentials from: {credentials_path}")
             self.credentials = service_account.Credentials.from_service_account_file(
                 credentials_path,
@@ -785,9 +792,14 @@ class BudgetProcessor:
             line_item = {
                 'class_code': class_code,
                 'class_name': class_name,
-                'line_number': row[0],
-                'description': row[1]
+                'line_item_number': row[0],
+                'line_item_description': row[1]
             }
+
+            # Skip if no line number or description
+            if not line_item['line_item_number'] or not line_item['line_item_description']:
+                logger.debug(f"Skipping row {row_number} in class {class_code} - missing line number or description")
+                return None
             
             # Add values based on class type
             if class_code == 'M2':  # Additional Talent Expenses
@@ -1027,12 +1039,13 @@ class BudgetProcessor:
         except (ValueError, TypeError):
             return "$0.00"
 
-    def process_sheet(self, spreadsheet_id: str, target_gid: str = None) -> Tuple[List[Dict], Dict]:
-        """Process a budget sheet and return the processed rows."""
+    def process_sheet(self, spreadsheet_id: str, sheet_gid: str = None) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """Process a budget sheet and return metadata and processed rows."""
         try:
             # Get sheet info
-            sheet_info = self._get_sheet_info(spreadsheet_id, target_gid)
+            sheet_info = self._get_sheet_info(spreadsheet_id, sheet_gid)
             sheet_title = sheet_info['title']
+            spreadsheet_title = sheet_info['spreadsheet_title']
             
             # Process cover sheet first
             cover_sheet_data = self._process_cover_sheet(spreadsheet_id, sheet_title)
@@ -1047,10 +1060,11 @@ class BudgetProcessor:
                     continue
                     
                 try:
-                    # Add rate limiting pause every 3 classes
-                    if processed_class_count > 0 and processed_class_count % 3 == 0:
-                        logger.info("Pausing for rate limiting after processing 3 classes...")
-                        time.sleep(15)  # Wait 15 seconds to stay under the per-minute limit
+                    # Add rate limiting pause every 2 classes
+                    if processed_class_count > 0 and processed_class_count % 2 == 0:
+                        pause_time = 30
+                        logger.info(f"Pausing for {pause_time}s after processing 2 classes...")
+                        time.sleep(pause_time)
                     
                     # Process class
                     class_rows = self._process_class(spreadsheet_id, sheet_title, class_code, mapping)
@@ -1062,7 +1076,7 @@ class BudgetProcessor:
                     continue
             
             # Get version info
-            clean_file = '_'.join(''.join(c if c.isalnum() else ' ' for c in sheet_info['spreadsheet_title']).split())
+            clean_file = '_'.join(''.join(c if c.isalnum() else ' ' for c in spreadsheet_title).split())
             clean_sheet = '_'.join(''.join(c if c.isalnum() else ' ' for c in sheet_title).split())
             date_str = datetime.now().strftime('%m-%d-%y')
             
@@ -1075,6 +1089,7 @@ class BudgetProcessor:
                 'upload_info': {
                     'id': f"{clean_file}-{clean_sheet}-{date_str}_{version_str}",
                     'spreadsheet_id': spreadsheet_id,
+                    'spreadsheet_title': spreadsheet_title,
                     'sheet_title': sheet_title,
                     'sheet_gid': sheet_info['gid'],
                     'timestamp': datetime.now().isoformat(),
@@ -1116,7 +1131,9 @@ class BudgetProcessor:
 
     def _get_range_values(self, spreadsheet_id: str, range_name: str) -> list:
         """Fetch values for a specific range with retry logic."""
-        max_retries = 3
+        max_retries = 5  # Increased from 3
+        base_delay = 2   # Base delay in seconds
+        
         for attempt in range(max_retries):
             try:
                 result = self.sheets_service.spreadsheets().values().get(
@@ -1127,32 +1144,39 @@ class BudgetProcessor:
             except Exception as e:
                 if 'RATE_LIMIT_EXCEEDED' in str(e):
                     if attempt < max_retries - 1:
-                        logger.info(f"Rate limit hit, waiting before retry {attempt + 1}/{max_retries}")
-                        time.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+                        delay = base_delay * (2 ** attempt)  # Exponential backoff: 2s, 4s, 8s, 16s, 32s
+                        logger.info(f"Rate limit hit, waiting {delay}s before retry {attempt + 1}/{max_retries}")
+                        time.sleep(delay)
                         continue
                 raise
-                
+
     def _get_range_values_batch(self, spreadsheet_id: str, ranges: List[str]) -> List[List]:
         """Fetch multiple ranges in a single batch request."""
-        try:
-            result = self.sheets_service.spreadsheets().values().batchGet(
-                spreadsheetId=spreadsheet_id,
-                ranges=ranges
-            ).execute()
-            
-            # Extract values from each range
-            values = []
-            for value_range in result.get('valueRanges', []):
-                values.append(value_range.get('values', []))
-            return values
-            
-        except Exception as e:
-            if 'RATE_LIMIT_EXCEEDED' in str(e):
-                logger.warning("Rate limit hit in batch request, retrying with delay...")
-                time.sleep(2)
-                return self._get_range_values_batch(spreadsheet_id, ranges)
-            logger.error(f"Error in batch request: {str(e)}")
-            raise
+        max_retries = 5  # Increased from implicit 1
+        base_delay = 2   # Base delay in seconds
+        
+        for attempt in range(max_retries):
+            try:
+                result = self.sheets_service.spreadsheets().values().batchGet(
+                    spreadsheetId=spreadsheet_id,
+                    ranges=ranges
+                ).execute()
+                
+                # Extract values from each range
+                values = []
+                for value_range in result.get('valueRanges', []):
+                    values.append(value_range.get('values', []))
+                return values
+                
+            except Exception as e:
+                if 'RATE_LIMIT_EXCEEDED' in str(e):
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)  # Exponential backoff
+                        logger.info(f"Rate limit hit in batch request, waiting {delay}s before retry {attempt + 1}/{max_retries}")
+                        time.sleep(delay)
+                        continue
+                logger.error(f"Error in batch request: {str(e)}")
+                raise
             
     def _get_sheet_info(self, spreadsheet_id: str, target_gid: str = None) -> dict:
         """Get sheet information including title and GID."""
@@ -1200,7 +1224,7 @@ class BudgetProcessor:
             return values[0][0] if values and values[0] else None
         except Exception as e:
             logging.warning(f"Error getting cell {cell_ref}: {str(e)}")
-            return None 
+            return None
 
     def _process_class(self, spreadsheet_id: str, sheet_title: str, class_code: str, mapping: Dict) -> List[Dict]:
         """Process a single class section and return its rows."""
@@ -1248,4 +1272,8 @@ class BudgetProcessor:
             if line_item:
                 processed_rows.append(line_item)
         
-        return processed_rows 
+        return processed_rows
+
+    def process_budget(self, spreadsheet_id: str, sheet_gid: str = None) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """Alias for process_sheet for backward compatibility."""
+        return self.process_sheet(spreadsheet_id, sheet_gid) 

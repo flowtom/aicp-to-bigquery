@@ -178,5 +178,23 @@
         "type": "FLOAT",
         "mode": "NULLABLE",
         "description": "Grand total actual"
+    },
+    {
+        "name": "grand_total_variance",
+        "type": "FLOAT",
+        "mode": "NULLABLE",
+        "description": "Variance between grand total estimate and actual"
+    },
+    {
+        "name": "client_total_actual",
+        "type": "FLOAT",
+        "mode": "NULLABLE",
+        "description": "Grand total actual amount billed to client"
+    },
+    {
+        "name": "client_total_variance",
+        "type": "FLOAT",
+        "mode": "NULLABLE",
+        "description": "Variance between grand total estimate and client actual"
     }
 ] 
