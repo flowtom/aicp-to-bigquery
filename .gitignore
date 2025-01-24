@@ -1,55 +1,15 @@
 # Credentials and secrets
-config/service-account-key.json
-config/bigquery-service-account-key.json
+config/*-service-account-key.json
 config/*.json
+!config/*.template.json
 .env
-credentials.json
-token.json
 
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual Environment
+*.class
 venv/
-ENV/
-env/
-.env
-.venv/
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Project specific
-config/service-account-key.json
-service-account-key.json
-config.json
-__pycache__/
-*.pyc output/
+# Output
 output/
 *.log
-
-# Credentials and secrets
-config/*-service-account-key.json
-config/*.json
