@@ -1,8 +1,9 @@
 import os
 import logging
 import json
-import functions_framework
 from typing import Dict, Any
+import functions_framework
+from flask import Request
 from ..services.job_setup_service import JobSetupService
 from ..services.budget_template_service import BudgetTemplateService
 
@@ -14,24 +15,29 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 @functions_framework.http
-def handle_job_webhook(request):
-    """Cloud Function to handle Clickup job creation webhooks."""
+def handle_job_automation(request: Request):
+    """Cloud Function to handle Clickup automation for job creation."""
     try:
-        # Verify webhook signature (TODO: Implement signature verification)
+        # Parse request payload
+        try:
+            payload = request.get_json()
+            logger.info(f"Received automation payload: {json.dumps(payload, indent=2)}")
+        except Exception as e:
+            logger.error(f"Error parsing JSON payload: {str(e)}")
+            return ('Invalid JSON payload', 400)
         
-        # Parse webhook payload
-        payload = request.get_json()
+        # Extract task information from payload
+        try:
+            task_id = payload.get('task_id')
+            if not task_id:
+                return ('Missing task_id in payload', 400)
+        except Exception as e:
+            logger.error(f"Error extracting task information: {str(e)}")
+            return ('Error processing task information', 400)
         
-        # Verify this is a task creation event
-        if not _is_job_task_creation(payload):
-            return ('Not a job task creation event', 200)
-            
         # Initialize services
         job_service = JobSetupService()
         budget_service = BudgetTemplateService()
-        
-        # Extract task information
-        task_id = payload['task_id']
         
         # Create job structure in Clickup
         job_structure = job_service.create_job_structure(task_id)
@@ -56,23 +62,16 @@ def handle_job_webhook(request):
             task_id=task_id
         )
         
-        return ('Success', 200)
+        # Return success response with created resources
+        response = {
+            'status': 'success',
+            'task_id': task_id,
+            'budget_url': budget_info['budget_url'],
+            'list_id': budget_info['list_id']
+        }
+        
+        return (json.dumps(response), 200, {'Content-Type': 'application/json'})
         
     except Exception as e:
-        logger.error(f"Error processing webhook: {str(e)}", exc_info=True)
-        return (str(e), 500)
-
-def _is_job_task_creation(payload: Dict[str, Any]) -> bool:
-    """Check if the webhook payload is for a job task creation event."""
-    try:
-        # Check event type
-        if payload.get('event') != 'taskCreated':
-            return False
-            
-        # Check if task is in the correct list/folder
-        # TODO: Add your specific conditions here
-        return True
-        
-    except Exception as e:
-        logger.error(f"Error checking task type: {str(e)}")
-        return False 
+        logger.error(f"Error processing automation: {str(e)}", exc_info=True)
+        return (str(e), 500) 
