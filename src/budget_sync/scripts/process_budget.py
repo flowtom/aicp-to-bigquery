@@ -223,15 +223,13 @@ def prepare_validation_records(validation_results: list, metadata: dict) -> list
     return validation_records
 
 def process_single_budget(budget_processor: BudgetProcessor, bigquery_service: BigQueryService, budget_config: Dict[str, Any]) -> bool:
-    """Process a single budget and upload to BigQuery.
-    
-    Returns:
-        bool: True if processing was successful, False if there was an error
-    """
+    """Process a single budget and upload to BigQuery."""
     try:
-        logger.info(f"\nProcessing budget: {budget_config['description']}")
-        logger.info(f"Spreadsheet ID: {budget_config['spreadsheet_id']}")
-        logger.info(f"Sheet GID: {budget_config['sheet_gid']}\n")
+        logger.info("\n" + "="*80)
+        logger.info(f"🔄 PROCESSING BUDGET: {budget_config['description']}")
+        logger.info(f"📄 Spreadsheet ID: {budget_config['spreadsheet_id']}")
+        logger.info(f"📑 Sheet GID: {budget_config['sheet_gid']}")
+        logger.info("="*80 + "\n")
 
         # Process budget data
         processed_rows, metadata = budget_processor.process_budget(
@@ -288,20 +286,24 @@ def process_single_budget(budget_processor: BudgetProcessor, bigquery_service: B
                 }
             }, f, indent=2)
         
-        logger.info(f"✅ Successfully processed budget: {budget_config['description']}")
-        logger.info(f"   - Results saved to: {output_filename}")
-        logger.info(f"   - Project ID: {project_id}")
-        logger.info(f"   - Budget ID: {budget_id}")
-        logger.info(f"   - Detail rows: {detail_count}")
-        logger.info(f"   - Validation rows: {validation_count}\n")
+        logger.info("\n" + "="*80)
+        logger.info(f"✅ COMPLETED PROCESSING: {budget_config['description']}")
+        logger.info(f"📁 Results saved to: {output_filename}")
+        logger.info(f"🆔 Project ID: {project_id}")
+        logger.info(f"📊 Budget ID: {budget_id}")
+        logger.info(f"📝 Detail rows: {detail_count}")
+        logger.info(f"⚠️  Validation rows: {validation_count}")
+        logger.info("="*80 + "\n")
         
         return True
         
     except Exception as e:
-        logger.error(f"❌ Error processing budget: {budget_config['description']}")
-        logger.error(f"   - Spreadsheet ID: {budget_config['spreadsheet_id']}")
-        logger.error(f"   - Sheet GID: {budget_config['sheet_gid']}")
-        logger.error(f"   - Error: {str(e)}\n")
+        logger.error("\n" + "="*80)
+        logger.error(f"❌ ERROR PROCESSING: {budget_config['description']}")
+        logger.error(f"📄 Spreadsheet ID: {budget_config['spreadsheet_id']}")
+        logger.error(f"📑 Sheet GID: {budget_config['sheet_gid']}")
+        logger.error(f"❗ Error: {str(e)}")
+        logger.error("="*80 + "\n")
         return False
 
 def parse_google_sheets_url(url: str) -> Dict[str, str]:
@@ -372,11 +374,14 @@ def main():
         successful_budgets = 0
         failed_budgets = []
         
-        logger.info(f"\nStarting to process {total_budgets} budget(s)...")
+        logger.info("\n" + "="*80)
+        logger.info(f"🚀 STARTING BUDGET PROCESSING")
+        logger.info(f"📊 Total budgets to process: {total_budgets}")
+        logger.info("="*80 + "\n")
         
         # Process each budget
         for index, budget in enumerate(budgets, 1):
-            logger.info(f"\nProcessing budget {index} of {total_budgets}")
+            logger.info(f"\n🔄 Processing budget {index} of {total_budgets}")
             
             if process_single_budget(budget_processor, bigquery_service, budget):
                 successful_budgets += 1
@@ -384,17 +389,19 @@ def main():
                 failed_budgets.append(budget['description'])
         
         # Print summary
-        logger.info("\n=== Processing Summary ===")
-        logger.info(f"Total budgets: {total_budgets}")
-        logger.info(f"Successfully processed: {successful_budgets}")
-        logger.info(f"Failed to process: {len(failed_budgets)}")
+        logger.info("\n" + "="*80)
+        logger.info("📋 PROCESSING SUMMARY")
+        logger.info(f"📊 Total budgets: {total_budgets}")
+        logger.info(f"✅ Successfully processed: {successful_budgets}")
+        logger.info(f"❌ Failed to process: {len(failed_budgets)}")
         
         if failed_budgets:
-            logger.info("\nFailed budgets:")
+            logger.info("\n❌ Failed budgets:")
             for budget in failed_budgets:
-                logger.info(f"- {budget}")
+                logger.info(f"   - {budget}")
         
-        logger.info("\nProcessing complete!")
+        logger.info("\n🏁 Processing complete!")
+        logger.info("="*80 + "\n")
             
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}")

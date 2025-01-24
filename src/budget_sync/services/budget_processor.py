@@ -1055,69 +1055,64 @@ class BudgetProcessor:
         except (ValueError, TypeError):
             return "$0.00"
 
-    def process_sheet(self, spreadsheet_id: str, sheet_gid: str = None) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-        """Process a budget sheet and return metadata and processed rows."""
+    def process_sheet(self, spreadsheet_id: str, sheet_gid: str) -> Tuple[List[Dict], Dict]:
+        """Process a single sheet from the spreadsheet."""
         try:
-            # Get sheet info
-            sheet_info = self._get_sheet_info(spreadsheet_id, sheet_gid)
-            sheet_title = sheet_info['title']
-            spreadsheet_title = sheet_info['spreadsheet_title']
-            
-            # Process cover sheet first
-            cover_sheet_data = self._process_cover_sheet(spreadsheet_id, sheet_title)
-            
             processed_rows = []
-            processed_class_count = 0
+            processed_classes = 0
+            pause_time = 10  # Reduced from 30 to 10 seconds
             
-            # Process each class
-            for class_code, mapping in self.CLASS_MAPPINGS.items():
-                # Skip cover sheet as it has a different structure
-                if class_code == 'COVER_SHEET':
-                    continue
-                    
-                try:
-                    # Add rate limiting pause every 2 classes
-                    if processed_class_count > 0 and processed_class_count % 2 == 0:
-                        pause_time = 30
-                        logger.info(f"Pausing for {pause_time}s after processing 2 classes...")
-                        time.sleep(pause_time)
-                    
-                    # Process class
-                    class_rows = self._process_class(spreadsheet_id, sheet_title, class_code, mapping)
-                    processed_rows.extend(class_rows)
-                    processed_class_count += 1
-                    
-                except Exception as e:
-                    logger.error(f"Error processing class {class_code}: {str(e)}")
-                    continue
+            # Get sheet title
+            sheet_title = self._get_sheet_title(spreadsheet_id, sheet_gid)
+            
+            # Process each budget class
+            for class_code, class_info in self.CLASS_MAPPINGS.items():
+                logger.info(f"🔄 Processing Class {class_code}...")
+                
+                # Process class data
+                class_rows = self._process_class(
+                    spreadsheet_id,
+                    sheet_gid,
+                    sheet_title,
+                    class_code,
+                    class_info
+                )
+                processed_rows.extend(class_rows)
+                processed_classes += 1
+                
+                # Pause after every 2 classes to avoid rate limits
+                if processed_classes % 2 == 0:
+                    logger.info(f"⏳ Pausing for {pause_time}s after processing {processed_classes} classes...")
+                    for i in range(pause_time, 0, -1):
+                        logger.info(f"⌛ Resuming in {i} seconds...")
+                        time.sleep(1)
             
             # Get version info
-            clean_file = '_'.join(''.join(c if c.isalnum() else ' ' for c in spreadsheet_title).split())
-            clean_sheet = '_'.join(''.join(c if c.isalnum() else ' ' for c in sheet_title).split())
+            clean_file = '_'.join(''.join(c if c.isalnum() else ' ' for c in sheet_title).split())
             date_str = datetime.now().strftime('%m-%d-%y')
             
             # Get version numbers
-            major, minor, patch = self._get_version_numbers(clean_file, clean_sheet, date_str, {})
+            major, minor, patch = self._get_version_numbers(clean_file, sheet_title, date_str, {})
             version_str = f"{major}.{minor}.{patch}"
             
             # Generate metadata with reorganized structure
             metadata = {
                 'upload_info': {
-                    'id': f"{clean_file}-{clean_sheet}-{date_str}_{version_str}",
+                    'id': f"{clean_file}-{sheet_title}-{date_str}_{version_str}",
                     'spreadsheet_id': spreadsheet_id,
-                    'spreadsheet_title': spreadsheet_title,
+                    'spreadsheet_title': sheet_title,
                     'sheet_title': sheet_title,
-                    'sheet_gid': sheet_info['gid'],
+                    'sheet_gid': sheet_gid,
                     'timestamp': datetime.now().isoformat(),
                     'version': version_str,
-                    'first_seen': self._get_first_seen_date(clean_file, clean_sheet),
+                    'first_seen': self._get_first_seen_date(clean_file, sheet_title),
                     'last_updated': date_str
                 },
                 'metadata': {
-                    'project_info': cover_sheet_data['project_summary']['project_info'],
-                    'core_team': cover_sheet_data['project_summary']['core_team'],
-                    'timeline': cover_sheet_data['project_summary']['timeline'],
-                    'financials': cover_sheet_data['financials']
+                    'project_info': self._process_cover_sheet(spreadsheet_id, sheet_title)['project_summary']['project_info'],
+                    'core_team': self._process_cover_sheet(spreadsheet_id, sheet_title)['project_summary']['core_team'],
+                    'timeline': self._process_cover_sheet(spreadsheet_id, sheet_title)['project_summary']['timeline'],
+                    'financials': self._process_cover_sheet(spreadsheet_id, sheet_title)['financials']
                 },
                 'processing_summary': {
                     'total_rows': len(processed_rows),
