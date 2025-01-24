@@ -12,7 +12,10 @@ from src.budget_sync.services.budget_processor import BudgetProcessor
 from src.budget_sync.services.bigquery_service import BigQueryService
 from dotenv import load_dotenv
 import sys
-from typing import Any
+from typing import Any, Dict, List
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 # Configure logging for more detailed output
 logging.basicConfig(
@@ -53,8 +56,8 @@ def extract_project_info(metadata: dict) -> dict:
         'latest_client_actual_total': float(financials['client_actual'].replace('$', '').replace(',', '')),
         'latest_variance': float(financials['variance'].replace('$', '').replace(',', '')),
         'latest_client_variance': float(financials['client_variance'].replace('$', '').replace(',', '')),
-        'created_at': current_time,  # Add created_at timestamp
-        'updated_at': current_time,  # Add updated_at timestamp
+        'created_at': current_time,
+        'updated_at': current_time,
         'status': 'active'
     }
 
@@ -219,31 +222,22 @@ def prepare_validation_records(validation_results: list, metadata: dict) -> list
     
     return validation_records
 
-def main():
-    """Main entry point for budget processing script."""
+def process_single_budget(budget_processor: BudgetProcessor, bigquery_service: BigQueryService, budget_config: Dict[str, Any]) -> bool:
+    """Process a single budget and upload to BigQuery.
+    
+    Returns:
+        bool: True if processing was successful, False if there was an error
+    """
     try:
-        # Load environment variables
-        load_dotenv()
-        
-        # Get required environment variables
-        spreadsheet_id = os.getenv('BUDGET_SPREADSHEET_ID')
-        sheet_gid = os.getenv('BUDGET_SHEET_GID')
-        bq_project_id = os.getenv('BIGQUERY_PROJECT_ID')
-        bq_dataset_id = os.getenv('BIGQUERY_DATASET_ID')
-        
-        if not all([spreadsheet_id, bq_project_id, bq_dataset_id]):
-            raise ValueError("Missing required environment variables")
-        
-        # Initialize services
-        budget_processor = BudgetProcessor()  # Will read credentials from environment
-        bigquery_service = BigQueryService(bq_project_id, bq_dataset_id)
-        
+        logger.info(f"\nProcessing budget: {budget_config['description']}")
+        logger.info(f"Spreadsheet ID: {budget_config['spreadsheet_id']}")
+        logger.info(f"Sheet GID: {budget_config['sheet_gid']}\n")
+
         # Process budget data
-        processed_rows, metadata = budget_processor.process_budget(spreadsheet_id, sheet_gid)  # Fixed order
-        
-        # Debug log the metadata structure
-        logger.info("Metadata structure:")
-        logger.info(json.dumps(metadata, indent=2))
+        processed_rows, metadata = budget_processor.process_budget(
+            budget_config['spreadsheet_id'], 
+            budget_config['sheet_gid']
+        )
         
         # Generate version hash
         version_hash = generate_version_hash({
@@ -294,16 +288,117 @@ def main():
                 }
             }, f, indent=2)
         
-        logger.info(f"Processing complete. Results saved to {output_filename}")
-        logger.info(f"BigQuery sync complete:")
-        logger.info(f"- Project: {project_id}")
-        logger.info(f"- Budget: {budget_id}")
-        logger.info(f"- Detail rows: {detail_count}")
-        logger.info(f"- Validation rows: {validation_count}")
+        logger.info(f"✅ Successfully processed budget: {budget_config['description']}")
+        logger.info(f"   - Results saved to: {output_filename}")
+        logger.info(f"   - Project ID: {project_id}")
+        logger.info(f"   - Budget ID: {budget_id}")
+        logger.info(f"   - Detail rows: {detail_count}")
+        logger.info(f"   - Validation rows: {validation_count}\n")
+        
+        return True
         
     except Exception as e:
-        logger.error(f"Error processing budget: {str(e)}")
-        raise
+        logger.error(f"❌ Error processing budget: {budget_config['description']}")
+        logger.error(f"   - Spreadsheet ID: {budget_config['spreadsheet_id']}")
+        logger.error(f"   - Sheet GID: {budget_config['sheet_gid']}")
+        logger.error(f"   - Error: {str(e)}\n")
+        return False
+
+def parse_google_sheets_url(url: str) -> Dict[str, str]:
+    """Parse a Google Sheets URL into spreadsheet_id and gid.
+    
+    Example URL format:
+    https://docs.google.com/spreadsheets/d/1340FUfPqPWIlQu2H6W5D5JTAwxJYCeYIbjVSTWUeepU/edit?gid=803920845
+    """
+    try:
+        # Extract spreadsheet ID
+        spreadsheet_id = url.split('/d/')[1].split('/')[0]
+        
+        # Extract GID
+        gid = None
+        if 'gid=' in url:
+            gid = url.split('gid=')[1].split('&')[0].split('#')[0]
+        
+        logger.info(f"Parsed URL: {url}")
+        logger.info(f"Extracted spreadsheet_id: {spreadsheet_id}")
+        logger.info(f"Extracted GID: {gid}")
+        
+        return {
+            "spreadsheet_id": spreadsheet_id,
+            "sheet_gid": gid or "0",  # Default to first sheet if no GID
+            "description": f"Budget from spreadsheet {spreadsheet_id}"
+        }
+    except Exception as e:
+        raise ValueError(f"Invalid Google Sheets URL format: {url}") from e
+
+def main():
+    """Main entry point for budget processing script."""
+    try:
+        # Load environment variables
+        load_dotenv()
+        
+        # Get required environment variables
+        bq_project_id = os.getenv('BIGQUERY_PROJECT_ID')
+        bq_dataset_id = os.getenv('BIGQUERY_DATASET_ID')
+        
+        if not all([bq_project_id, bq_dataset_id]):
+            raise ValueError("Missing required environment variables")
+            
+        # Parse command line arguments
+        parser = argparse.ArgumentParser(description='Process AICP budgets and sync to BigQuery')
+        parser.add_argument('urls', nargs='+', help='One or more Google Sheets URLs to process')
+        args = parser.parse_args()
+        
+        # Parse URLs into budget configs
+        budgets = []
+        for url in args.urls:
+            try:
+                budget_config = parse_google_sheets_url(url)
+                budgets.append(budget_config)
+            except ValueError as e:
+                logger.error(f"Skipping invalid URL: {url}")
+                logger.error(f"Error: {str(e)}")
+                continue
+            
+        if not budgets:
+            raise ValueError("No valid Google Sheets URLs provided")
+            
+        # Initialize services
+        budget_processor = BudgetProcessor()
+        bigquery_service = BigQueryService(bq_project_id, bq_dataset_id)
+        
+        # Process each budget and track results
+        total_budgets = len(budgets)
+        successful_budgets = 0
+        failed_budgets = []
+        
+        logger.info(f"\nStarting to process {total_budgets} budget(s)...")
+        
+        # Process each budget
+        for index, budget in enumerate(budgets, 1):
+            logger.info(f"\nProcessing budget {index} of {total_budgets}")
+            
+            if process_single_budget(budget_processor, bigquery_service, budget):
+                successful_budgets += 1
+            else:
+                failed_budgets.append(budget['description'])
+        
+        # Print summary
+        logger.info("\n=== Processing Summary ===")
+        logger.info(f"Total budgets: {total_budgets}")
+        logger.info(f"Successfully processed: {successful_budgets}")
+        logger.info(f"Failed to process: {len(failed_budgets)}")
+        
+        if failed_budgets:
+            logger.info("\nFailed budgets:")
+            for budget in failed_budgets:
+                logger.info(f"- {budget}")
+        
+        logger.info("\nProcessing complete!")
+            
+    except Exception as e:
+        logger.error(f"Fatal error: {str(e)}")
+        sys.exit(1)
 
 if __name__ == '__main__':
     main() 

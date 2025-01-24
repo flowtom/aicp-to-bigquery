@@ -11,7 +11,7 @@ This tool transforms unstructured AICP budget data from Google Sheets into a sta
 - Used by other systems (like BigQuery)
 
 ### Input
-- Google Sheet containing AICP budget data
+- One or more Google Sheets containing AICP budget data
 - Structured with budget classes A through P
 - Contains estimates and actuals for budget line items
 
@@ -54,14 +54,12 @@ pip install -r requirements.txt
   - Google Sheets API (roles/sheets.reader)
   - BigQuery Data Editor (roles/bigquery.dataEditor)
 - Download service account key to `config/service-account-key.json`
-- Share your Google Sheet with the service account email
+- Share your Google Sheets with the service account email
 
 5. **Configure Environment Variables**
 Create `.env` file in the project root:
 ```bash
 # Google Sheets Configuration
-BUDGET_SPREADSHEET_ID=your-spreadsheet-id
-BUDGET_SHEET_GID=your-sheet-gid
 GOOGLE_APPLICATION_CREDENTIALS=config/service-account-key.json
 
 # BigQuery Configuration
@@ -73,16 +71,40 @@ USER_EMAIL=your.email@example.com
 VERSION_NOTES="Initial version"  # Optional
 ```
 
+6. **Configure Budget List**
+Create `config/budget_list.json`:
+```json
+{
+    "budgets": [
+        {
+            "spreadsheet_id": "your-spreadsheet-id-1",
+            "sheet_gid": "your-sheet-gid-1",
+            "description": "Budget 1 Description",
+            "version_notes": "Optional notes"
+        },
+        {
+            "spreadsheet_id": "your-spreadsheet-id-2",
+            "sheet_gid": "your-sheet-gid-2",
+            "description": "Budget 2 Description"
+        }
+    ]
+}
+```
+
 ## Running the Script
 
-1. **Process a budget and sync to BigQuery:**
+1. **Process budgets and sync to BigQuery:**
 ```bash
+# Use default config file (config/budget_list.json)
 python src/budget_sync/scripts/process_budget.py
+
+# Or specify a custom config file
+python src/budget_sync/scripts/process_budget.py --config path/to/config.json
 ```
 
 The script will:
-- Process the budget spreadsheet
-- Create/update project record
+- Process each budget spreadsheet
+- Create/update project records
 - Upload budget data
 - Upload line item details
 - Save validation results
@@ -91,7 +113,7 @@ The script will:
 ## Output
 
 1. **Local Files**
-- `output/processed_budget_[ID].json` - Processed budget data and metadata
+- `output/processed_budget_[ID].json` - Processed budget data and metadata for each budget
 
 2. **BigQuery Tables**
 - `projects` - Core project information
@@ -126,7 +148,7 @@ Solution: Check service account key path in GOOGLE_APPLICATION_CREDENTIALS
 ```
 googleapiclient.errors.HttpError: 404
 ```
-Solution: Verify BUDGET_SPREADSHEET_ID and sharing permissions
+Solution: Verify spreadsheet IDs and sharing permissions
 
 3. **BigQuery Errors**
 ```

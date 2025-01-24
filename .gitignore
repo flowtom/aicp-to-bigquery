@@ -3,6 +3,8 @@ config/service-account-key.json
 config/bigquery-service-account-key.json
 config/*.json
 .env
+credentials.json
+token.json
 
 # Python
 __pycache__/

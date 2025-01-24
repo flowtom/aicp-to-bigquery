@@ -10,6 +10,9 @@ import json
 from typing import Dict, List, Any, Optional, Tuple
 import time
 import os
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -575,27 +578,40 @@ class BudgetProcessor:
         }
     }
     
-    def __init__(self, credentials_path: str = None):
-        """Initialize with Google Sheets credentials."""
+    def __init__(self):
+        """Initialize the budget processor."""
         try:
-            # Use provided path or fall back to environment variable
-            if not credentials_path:
-                credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-            if not credentials_path:
-                raise ValueError("No credentials path provided and GOOGLE_APPLICATION_CREDENTIALS not set")
-                
-            logger.info(f"Loading credentials from: {credentials_path}")
-            self.credentials = service_account.Credentials.from_service_account_file(
-                credentials_path,
-                scopes=['https://www.googleapis.com/auth/spreadsheets.readonly']
-            )
-            logger.info(f"Using service account: {self.credentials.service_account_email}")
-            
-            self.sheets_service = build('sheets', 'v4', credentials=self.credentials)
-            logger.info("Successfully initialized Google Sheets service")
-            
+            # If modifying these scopes, delete the file token.json.
+            SCOPES = [
+                'https://www.googleapis.com/auth/spreadsheets',
+                'https://www.googleapis.com/auth/drive'
+            ]
+
+            creds = None
+            # The file token.json stores the user's access and refresh tokens, and is
+            # created automatically when the authorization flow completes for the first time.
+            if os.path.exists('token.json'):
+                with open('token.json', 'r') as token:
+                    creds_data = json.load(token)
+                    creds = Credentials.from_authorized_user_info(creds_data, SCOPES)
+
+            # If there are no (valid) credentials available, let the user log in.
+            if not creds or not creds.valid:
+                if creds and creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
+                else:
+                    flow = InstalledAppFlow.from_client_secrets_file(
+                        'credentials.json', SCOPES)
+                    creds = flow.run_local_server(port=0)
+                # Save the credentials for the next run
+                with open('token.json', 'w') as token:
+                    token.write(creds.to_json())
+
+            logger.info("Using OAuth2 credentials for user account")
+            self.sheets_service = build('sheets', 'v4', credentials=creds)
+
         except Exception as e:
-            logger.error(f"Failed to initialize budget processor: {str(e)}")
+            logger.error(f"Error initializing budget processor: {str(e)}")
             raise
 
     def _get_version_numbers(self, file_name: str, sheet_name: str, date_str: str, current_data: dict) -> tuple[int, int, int]:
