@@ -1,7 +1,7 @@
 """
 Budget processor service for handling AICP budget data.
 """
-from datetime import datetime
+from datetime import datetime, UTC
 import logging
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -13,10 +13,18 @@ import os
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
+from src.budget_sync.models.budget import Budget, BudgetClass
+from src.budget_sync.services.bigquery_service import BigQueryService
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+class BudgetValidationError(Exception):
+    """Exception raised for errors in the budget validation."""
+    pass
+
 
 class BudgetProcessor:
     """Processes AICP budget data from Google Sheets."""
@@ -578,8 +586,11 @@ class BudgetProcessor:
         }
     }
     
-    def __init__(self):
-        """Initialize the budget processor."""
+    def __init__(self, spreadsheet_id: str, gid: str = None):
+        """Initialize the budget processor with spreadsheet ID and sheet GID."""
+        self.spreadsheet_id = spreadsheet_id
+        self.gid = gid
+        
         try:
             # If modifying these scopes, delete the file token.json.
             SCOPES = [
@@ -607,8 +618,23 @@ class BudgetProcessor:
                 with open('token.json', 'w') as token:
                     token.write(creds.to_json())
 
-            logger.info("Using OAuth2 credentials for user account")
+            logger.info(f"Using OAuth2 credentials for spreadsheet {spreadsheet_id}")
             self.sheets_service = build('sheets', 'v4', credentials=creds)
+            
+            # Initialize BigQuery service
+            project_id = os.getenv('BIGQUERY_PROJECT_ID')
+            dataset_id = os.getenv('BIGQUERY_DATASET_ID')
+            
+            if project_id and dataset_id:
+                try:
+                    self.bigquery_service = BigQueryService(project_id, dataset_id)
+                    logger.info("✓ BigQuery service initialized successfully")
+                except Exception as e:
+                    logger.error(f"❌ Failed to initialize BigQuery service: {str(e)}")
+                    self.bigquery_service = None
+            else:
+                logger.warning("⚠️ BigQuery service not initialized - missing environment variables")
+                self.bigquery_service = None
 
         except Exception as e:
             logger.error(f"Error initializing budget processor: {str(e)}")
@@ -804,10 +830,8 @@ class BudgetProcessor:
             if class_name and ':' in class_name:
                 class_name = class_name.split(':', 1)[1].strip()
 
-            # Create base line item
+            # Process line item with class totals
             line_item = {
-                'class_code': class_code,
-                'class_name': class_name,
                 'line_item_number': row[0],
                 'line_item_description': row[1]
             }
@@ -989,29 +1013,100 @@ class BudgetProcessor:
             
         return None
 
+    def _batch_get_values(self, spreadsheet_id: str, ranges: List[str], sheet_title: str) -> Dict[str, List]:
+        """Fetch multiple cell ranges in a batch request to reduce API calls."""
+        max_retries = 5
+        base_delay = 2
+        
+        # Ensure budget_name is valid before requesting data
+        budget_name = sheet_title if sheet_title else "Fallback_Sheet_Name"
+        formatted_ranges = []
+        for cell in ranges:
+            if '!' in cell:  # If it already contains a sheet title, don't prepend
+                formatted_ranges.append(cell)
+            else:
+                formatted_ranges.append(f"'{budget_name}'!{cell}")
+
+        # Debug log to check the constructed ranges
+        logging.debug(f"Batch request using sheet_title: {sheet_title}")
+        logging.debug(f"Ranges requested: {formatted_ranges}")
+        
+        for attempt in range(max_retries):
+            try:
+                result = self.sheets_service.spreadsheets().values().batchGet(
+                    spreadsheetId=spreadsheet_id,
+                    ranges=formatted_ranges
+                ).execute()
+                
+                # Convert to dictionary for easier access
+                return {
+                    entry['range']: entry.get('values', [['']])[0] 
+                    for entry in result.get('valueRanges', [])
+                }
+            except Exception as e:
+                if 'RATE_LIMIT_EXCEEDED' in str(e) and attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.info(f"Rate limit hit, waiting {delay}s before retry {attempt + 1}/{max_retries}")
+                    time.sleep(delay)
+                    continue
+                logger.error(f"Error in batch request: {str(e)}")
+                raise
+
     def _process_cover_sheet(self, spreadsheet_id: str, sheet_title: str) -> Dict:
-        """Process cover sheet data."""
+        """Process cover sheet data using batch request."""
         mapping = self.CLASS_MAPPINGS['COVER_SHEET']
         
-        # Extract project info
+        # Collect all ranges we need to fetch
+        ranges_to_fetch = []
+        
+        # Project info ranges
+        for cell in mapping['project_info'].values():
+            ranges_to_fetch.append(f"'{sheet_title}'!{cell}")
+            
+        # Core team ranges
+        for cell in mapping['core_team'].values():
+            ranges_to_fetch.append(f"'{sheet_title}'!{cell}")
+            
+        # Timeline ranges
+        for cell in mapping['timeline'].values():
+            ranges_to_fetch.append(f"'{sheet_title}'!{cell}")
+            
+        # Firm bid ranges
+        for category in mapping['firm_bid_summary'].values():
+            for field in ['estimated', 'actual', 'variance', 'client_actual', 'client_variance']:
+                if field in category:
+                    ranges_to_fetch.append(f"'{sheet_title}'!{category[field]}")
+                    
+        # Grand total ranges
+        for field in ['estimated', 'actual', 'variance', 'client_actual', 'client_variance']:
+            if field in mapping['grand_total']:
+                ranges_to_fetch.append(f"'{sheet_title}'!{mapping['grand_total'][field]}")
+        
+        # Fetch all values in one batch request
+        batch_values = self._batch_get_values(spreadsheet_id, ranges_to_fetch, sheet_title)
+        
+        # Process project info
         project_info = {}
-        for field, cell_ref in mapping['project_info'].items():
-            value = self._get_cell_value(spreadsheet_id, sheet_title, cell_ref)
-            project_info[field] = value if value else ""
-            
-        # Extract core team info
+        for field, cell in mapping['project_info'].items():
+            range_key = f"'{sheet_title}'!{cell}"
+            value = batch_values.get(range_key, [''])[0] or ""
+            project_info[field] = value
+        
+        # Process core team
         core_team = {}
-        for role, cell_ref in mapping['core_team'].items():
-            value = self._get_cell_value(spreadsheet_id, sheet_title, cell_ref)
-            core_team[role] = value if value else ""
-            
-        # Extract timeline
+        for role, cell in mapping['core_team'].items():
+            range_key = f"'{sheet_title}'!{cell}"
+            value = batch_values.get(range_key, [''])[0] or ""
+            core_team[role] = value
+        
+        # Process timeline
         timeline = {}
-        for milestone, cell_ref in mapping['timeline'].items():
-            value = self._get_cell_value(spreadsheet_id, sheet_title, cell_ref)
-            timeline[milestone] = value if value else "0"
-            
-        # Extract firm bid summary
+        for milestone, cell in mapping['timeline'].items():
+            range_key = f"'{sheet_title}'!{cell}"
+            value = batch_values.get(range_key, ['0'])[0] or "0"
+            timeline[milestone] = value
+        
+        # Process firm bid summary
         firm_bid = {}
         for category, details in mapping['firm_bid_summary'].items():
             firm_bid[category] = {
@@ -1020,14 +1115,16 @@ class BudgetProcessor:
             }
             for field in ['estimated', 'actual', 'variance', 'client_actual', 'client_variance']:
                 if field in details:
-                    value = self._get_cell_value(spreadsheet_id, sheet_title, details[field])
+                    range_key = f"'{sheet_title}'!{details[field]}"
+                    value = batch_values.get(range_key, ['$0.00'])[0]
                     firm_bid[category][field] = self._format_money(value)
         
-        # Extract grand total
+        # Process grand total
         grand_total = {'description': mapping['grand_total']['description']}
         for field in ['estimated', 'actual', 'variance', 'client_actual', 'client_variance']:
             if field in mapping['grand_total']:
-                value = self._get_cell_value(spreadsheet_id, sheet_title, mapping['grand_total'][field])
+                range_key = f"'{sheet_title}'!{mapping['grand_total'][field]}"
+                value = batch_values.get(range_key, ['$0.00'])[0]
                 grand_total[field] = self._format_money(value)
         
         return {
@@ -1049,11 +1146,34 @@ class BudgetProcessor:
         try:
             if isinstance(value, str):
                 if value.startswith('$'):
-                    return value
-                value = float(value.replace(',', ''))
-            return "${:,.2f}".format(float(value))
+                    return value  # Already formatted
+                value = float(value.replace(',', ''))  # Convert to float safely
+            return "${:,.2f}".format(float(value))  # Format as currency
         except (ValueError, TypeError):
-            return "$0.00"
+            return "$0.00"  # Default if formatting fails
+
+    def _validate_cover_sheet(self, cover_sheet_data: Dict, spreadsheet_title: str) -> Dict:
+        """Validates the cover sheet data and applies fallback defaults."""
+        if not isinstance(cover_sheet_data, dict):
+            raise BudgetValidationError("Cover sheet data must be a dictionary")
+            
+        # Extract project info properly
+        project_info = cover_sheet_data.get('project_summary', {}).get('project_info', {})
+
+        # Apply defaults for missing required fields
+        if not project_info.get('project_title'):
+            logger.warning("⚠️ Missing project_title, defaulting to spreadsheet name.")
+            project_info['project_title'] = spreadsheet_title
+
+        if not project_info.get('production_company'):
+            logger.warning("⚠️ Missing production_company, defaulting to 'Newfangled Studios'.")
+            project_info['production_company'] = "Newfangled Studios"
+
+        # Update the project info in the cover sheet data
+        cover_sheet_data['project_summary']['project_info'] = project_info
+
+        logger.info("✓ Cover sheet validated successfully (fallbacks applied if needed)")
+        return cover_sheet_data
 
     def process_sheet(self, spreadsheet_id: str, sheet_gid: str) -> Tuple[List[Dict], Dict]:
         """Process a single sheet from the spreadsheet."""
@@ -1189,39 +1309,33 @@ class BudgetProcessor:
                 logger.error(f"Error in batch request: {str(e)}")
                 raise
             
-    def _get_sheet_info(self, spreadsheet_id: str, target_gid: str = None) -> dict:
-        """Get sheet information including title and GID."""
+    def _get_sheet_info(self, spreadsheet_id: str, gid: str) -> Dict[str, str]:
+        """Get sheet information including title."""
         try:
-            # Get spreadsheet info
-            spreadsheet = self.sheets_service.spreadsheets().get(
-                spreadsheetId=spreadsheet_id
-            ).execute()
+            logger.info(f"Fetching sheet metadata for spreadsheet {spreadsheet_id} and GID {gid}")
+            response = self.sheets_service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
             
-            # Get spreadsheet title
-            spreadsheet_title = spreadsheet.get('properties', {}).get('title', 'Untitled')
-            
-            # Find sheet by GID if provided, otherwise use first sheet
-            target_sheet = None
-            if target_gid:
-                for sheet in spreadsheet['sheets']:
-                    if str(sheet['properties'].get('sheetId')) == target_gid:
-                        target_sheet = sheet
-                        break
-            else:
-                target_sheet = spreadsheet['sheets'][0]
-            
-            if not target_sheet:
-                raise ValueError(f"Sheet with GID {target_gid} not found")
-            
+            sheets = response.get("sheets", [])
+            for sheet in sheets:
+                if str(sheet["properties"]["sheetId"]) == str(gid):
+                    logger.info(f"✅ Found sheet title: {sheet['properties']['title']}")
+                    return {
+                        "spreadsheet_title": response.get("properties", {}).get("title", "Unknown Spreadsheet"),
+                        "title": sheet["properties"]["title"],
+                        "gid": gid
+                    }
+
+            # If we get here, no matching sheet was found
+            logger.warning(f"⚠️ No sheet found for GID {gid}, defaulting to unknown")
             return {
-                'title': target_sheet['properties']['title'],
-                'gid': str(target_sheet['properties']['sheetId']),
-                'spreadsheet_title': spreadsheet_title
+                "spreadsheet_title": response.get("properties", {}).get("title", "Unknown Spreadsheet"),
+                "title": f"Sheet_{gid}",
+                "gid": gid
             }
-            
+
         except Exception as e:
-            logger.error(f"Error getting sheet info: {str(e)}")
-            raise
+            logger.error(f"❌ Error fetching sheet metadata: {str(e)}")
+            raise ValueError(f"Failed to access sheet: {str(e)}")
 
     def _get_cell_value(self, spreadsheet_id: str, sheet_title: str, cell_ref: str) -> Any:
         """Get value from a cell."""
@@ -1237,54 +1351,180 @@ class BudgetProcessor:
             logging.warning(f"Error getting cell {cell_ref}: {str(e)}")
             return None
 
-    def _process_class(self, spreadsheet_id: str, sheet_title: str, class_code: str, mapping: Dict) -> List[Dict]:
-        """Process a single class section and return its rows."""
+    def _process_class(self, spreadsheet_id: str, sheet_title: str, class_code: str, mapping: Dict) -> Optional[BudgetClass]:
+        """Process a single class section and return a BudgetClass object."""
         # Get class header
         header_range = f"'{sheet_title}'!{mapping['class_code_cell']}:{mapping['class_name_cell']}"
         header_values = self._get_range_values(spreadsheet_id, header_range)
         
         # Debug header values
-        logger.info(f"Class {class_code} header range: {header_range}")
-        logger.info(f"Class {class_code} header values: {header_values}")
+        logger.debug(f"Class {class_code} header range: {header_range}")
+        logger.debug(f"Class {class_code} header values: {header_values}")
         
         if not header_values:
-            logger.warning(f"No header values found for class {class_code}")
-            return []
+            logger.warning(f"⚠️ No header values found for class {class_code}, skipping...")
+            return None
         
         # Get class name
         class_name = self._get_class_name(header_values, class_code, mapping, spreadsheet_id, sheet_title)
         if not class_name:
-            logger.warning(f"No class name found for class {class_code}")
-            return []
+            logger.warning(f"⚠️ No class name found for class {class_code}, skipping...")
+            return None
             
         # Get all data including calculated totals
         data_range = f"'{sheet_title}'!{mapping['line_items_range']['start']}:{mapping['line_items_range']['end']}"
         data_values = self._get_range_values(spreadsheet_id, data_range)
         
         if not data_values:
-            logger.warning(f"No data values found for class {class_code}")
-            return []
+            logger.warning(f"⚠️ No data values found for class {class_code}, skipping...")
+            return None
         
         # Get totals directly from cells
         class_totals = self._get_class_totals(spreadsheet_id, sheet_title, mapping)
         
-        processed_rows = []
+        line_items = []
         # Process each line item
         for row_number, row in enumerate(data_values, start=1):
             if not row:  # Skip empty rows
                 continue
                 
             if len(row) < 2:  # Need at least number and description
-                logger.debug(f"Incomplete row {row_number} in class {class_code}: {row}")
+                logger.debug(f"Skipping incomplete row {row_number} in class {class_code}")
                 continue
                 
             # Process line item with class totals
             line_item = self._process_line_item(row, class_code, class_name, class_totals, row_number)
             if line_item:
-                processed_rows.append(line_item)
+                line_items.append(line_item)
         
-        return processed_rows
+        if not line_items:
+            logger.warning(f"⚠️ Class {class_code} has no valid line items, skipping...")
+            return None
 
-    def process_budget(self, spreadsheet_id: str, sheet_gid: str = None) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-        """Alias for process_sheet for backward compatibility."""
-        return self.process_sheet(spreadsheet_id, sheet_gid) 
+        def clean_money_value(value: str) -> float:
+            """Convert money or percentage string to float."""
+            if not value:
+                return 0.0
+            try:
+                # Handle percentage values
+                if isinstance(value, str):
+                    # Remove $ if present (some percentage cells might have $ prefix)
+                    value = value.replace('$', '')
+                    
+                    if value.endswith('%'):
+                        # Convert percentage to decimal (e.g., "28%" -> 0.28)
+                        return float(value.rstrip('%')) / 100
+                    
+                    # Handle regular money values
+                    return float(value.replace(',', ''))
+                    
+                return float(value)
+            except (ValueError, TypeError):
+                logger.warning(f"Could not convert value '{value}' to float, using 0.0")
+                return 0.0
+            
+        # Create BudgetClass object with cleaned values
+        return BudgetClass(
+            class_code=class_code,
+            class_name=class_name,
+            estimate_subtotal=clean_money_value(class_totals['class_estimate_subtotal']),
+            estimate_pnw=clean_money_value(class_totals.get('class_estimate_pnw', '0')),
+            estimate_total=clean_money_value(class_totals['class_estimate_total']),
+            actual_subtotal=clean_money_value(class_totals['class_actual_subtotal']),
+            actual_pnw=clean_money_value(class_totals.get('class_actual_pnw', '0')),
+            actual_total=clean_money_value(class_totals['class_actual_total']),
+            line_items=line_items
+        )
+
+    def process_budget(self) -> Optional[Dict]:
+        """Process budget with enhanced validation and error handling."""
+        try:
+            logger.info(f"Processing budget from sheet {self.spreadsheet_id}")
+            
+            try:
+                sheet_info = self._get_sheet_info(self.spreadsheet_id, self.gid)
+            except ValueError as e:
+                logger.error(f"Failed to get sheet info: {str(e)}")
+                return None
+
+            try:
+                # Process cover sheet
+                cover_sheet_data = self._process_cover_sheet(self.spreadsheet_id, sheet_info['title'])
+                
+                # Double-check cover_sheet_data exists before using it
+                if not cover_sheet_data:
+                    logger.warning("⚠️ cover_sheet_data is empty! Using default values.")
+                    cover_sheet_data = {}  # Prevents it from being None
+                
+                validated_data = self._validate_cover_sheet(cover_sheet_data, sheet_info['spreadsheet_title'])
+
+                if not isinstance(validated_data, dict):
+                    raise ValueError("Cover sheet validation returned a non-dict type")
+
+                logger.info("✓ Cover sheet processed successfully")
+                
+                # Process budget classes
+                classes = {}
+                logger.info(f"Starting to process budget classes...")
+                logger.info(f"Found {len([k for k in self.CLASS_MAPPINGS.keys() if k != 'COVER_SHEET'])} classes to process")
+                
+                for class_code, mapping in self.CLASS_MAPPINGS.items():
+                    if class_code == 'COVER_SHEET':  # Skip cover sheet mapping
+                        continue
+                        
+                    try:
+                        logger.info(f"🔍 Processing budget class: {class_code}...")
+                        logger.debug(f"Using mapping: {json.dumps(mapping, indent=2)}")
+                        
+                        # Get class header to check if class exists
+                        header_range = f"'{sheet_info['title']}'!{mapping['class_code_cell']}:{mapping['class_name_cell']}"
+                        header_values = self._get_range_values(self.spreadsheet_id, header_range)
+                        
+                        if not header_values:
+                            logger.info(f"⚠️ Class {class_code} header not found at {header_range}, skipping.")
+                            continue
+                            
+                        logger.info(f"Found class header: {header_values}")
+                        
+                        class_data = self._process_class(
+                            self.spreadsheet_id,
+                            sheet_info['title'],
+                            class_code,
+                            mapping
+                        )
+                        
+                        if class_data:
+                            classes[class_code] = class_data
+                            logger.info(f"✅ Successfully processed class {class_code}")
+                            if hasattr(class_data, 'line_items'):
+                                logger.info(f"   Found {len(class_data.line_items)} line items")
+                        else:
+                            logger.warning(f"⚠️ Class {class_code} returned no data")
+
+                    except Exception as e:
+                        logger.error(f"❌ Error processing class {class_code}: {str(e)}")
+                        import traceback
+                        logger.error(f"Traceback: {traceback.format_exc()}")
+                
+                logger.info(f"Completed class processing. Found {len(classes)} valid classes.")
+                
+                # Combine all data
+                budget_data = {
+                    'upload_id': self._generate_upload_id(sheet_info['spreadsheet_title'], sheet_info['title']),
+                    'upload_timestamp': datetime.now(UTC),
+                    'version_status': 'draft',
+                    'sheet_title': sheet_info['title'],
+                    'project_summary': validated_data.get('project_summary', {}),
+                    'financials': validated_data.get('financials', {}),
+                    'classes': classes
+                }
+
+                return budget_data
+
+            except ValueError as e:
+                logger.error(f"❌ Cover sheet validation failed: {str(e)}")
+                return None
+
+        except Exception as e:
+            logger.error(f"❌ Unexpected error: {str(e)}")
+            return None 

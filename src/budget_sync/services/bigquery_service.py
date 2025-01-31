@@ -95,12 +95,16 @@ class BigQueryService:
             self.client.create_table(projects_table, exists_ok=True)
             logger.info("Projects table is ready")
             
-            # Recreate budget table with updated schema
-            self._recreate_table(
-                self.budget_table_id,  # Use the full table ID
-                self._create_schema(self.budget_schema),
-                time_partition_field="upload_timestamp"
+            # Create budget table
+            budget_table = bigquery.Table(
+                self.budget_table_id,
+                schema=self._create_schema(self.budget_schema)
             )
+            budget_table.time_partitioning = bigquery.TimePartitioning(
+                type_=bigquery.TimePartitioningType.DAY,
+                field="upload_timestamp"
+            )
+            self.client.create_table(budget_table, exists_ok=True)
             logger.info("Budget table is ready")
             
             # Create budget detail table

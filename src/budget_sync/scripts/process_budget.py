@@ -1,411 +1,357 @@
 """
 Script to process budget data from Google Sheets and sync to BigQuery.
 """
-import argparse
-import json
 import logging
-import os
-from pathlib import Path
-from datetime import datetime
-import hashlib
-from src.budget_sync.services.budget_processor import BudgetProcessor
-from src.budget_sync.services.bigquery_service import BigQueryService
-from dotenv import load_dotenv
 import sys
-from typing import Any, Dict, List
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+from datetime import datetime, UTC, timedelta
+from typing import Dict, Any, List, Optional, Tuple
+import re
+from src.budget_sync.services.budget_processor import BudgetProcessor
+import os
+from dotenv import load_dotenv
+from pathlib import Path
+import json
 
-# Configure logging for more detailed output
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Set up logging first
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-sys.path.append(str(Path(__file__).resolve().parents[2] / 'src'))
+# Load environment variables from .env file
+env_path = Path(__file__).parents[3] / '.env'
+load_dotenv(env_path)
 
-def generate_version_hash(data: dict) -> str:
-    """Generate a hash of the data for version tracking."""
-    content = json.dumps(data, sort_keys=True)
-    return hashlib.sha256(content.encode()).hexdigest()[:8]
-
-def extract_project_info(metadata: dict) -> dict:
-    """Extract project information from metadata."""
-    # Get project info from metadata
-    project_info = metadata['metadata']['project_info']
-    financials = metadata['metadata']['financials']['grand_total']
-    
-    # Generate a project ID using spreadsheet title if project title is empty
-    base_name = project_info['project_title'] or metadata['upload_info']['spreadsheet_title']
-    project_id = f"{base_name}_{datetime.now().strftime('%Y%m%d')}"
-    project_id = ''.join(c if c.isalnum() else '_' for c in project_id)
-    
-    # Get current timestamp in UTC
-    current_time = datetime.utcnow().isoformat()
-    
-    return {
-        'project_id': project_id,
-        'job_name': project_info['project_title'] or metadata['upload_info']['spreadsheet_title'],
-        'client_name': project_info.get('client_name', ''),
-        'production_company': project_info.get('production_company', ''),
-        'latest_budget_id': f"{project_id}_{datetime.now().strftime('%H%M%S')}",
-        'latest_estimate_total': float(financials['estimated'].replace('$', '').replace(',', '')),
-        'latest_actual_total': float(financials['actual'].replace('$', '').replace(',', '')),
-        'latest_client_actual_total': float(financials['client_actual'].replace('$', '').replace(',', '')),
-        'latest_variance': float(financials['variance'].replace('$', '').replace(',', '')),
-        'latest_client_variance': float(financials['client_variance'].replace('$', '').replace(',', '')),
-        'created_at': current_time,
-        'updated_at': current_time,
-        'status': 'active'
-    }
-
-def prepare_budget_record(metadata: dict, version_hash: str) -> dict:
-    """Prepare budget record from metadata."""
-    current_time = datetime.utcnow().isoformat()
-    project_info = metadata['metadata']['project_info']
-    project_date = project_info['date']
-    if not project_date:
-        # If no project date, use the upload date (just the date portion)
-        project_date = current_time.split('T')[0]
-
-    # Use same project ID generation logic as extract_project_info
-    base_name = project_info['project_title'] or metadata['upload_info']['spreadsheet_title']
-    project_id = f"{base_name}_{datetime.now().strftime('%Y%m%d')}"
-    project_id = ''.join(c if c.isalnum() else '_' for c in project_id)
-    budget_id = f"{project_id}_{datetime.now().strftime('%H%M%S')}"
-
-    return {
-        'budget_id': budget_id,
-        'project_id': project_id,
-        'upload_timestamp': current_time,
-        'version_hash': version_hash,
-        'user_email': os.getenv('USER_EMAIL'),
-        'version_status': 'draft',
-        'version_notes': os.getenv('VERSION_NOTES', ''),
-        'spreadsheet_id': metadata['upload_info']['spreadsheet_id'],
-        'sheet_name': metadata['upload_info']['sheet_title'],
-        'sheet_gid': metadata['upload_info']['sheet_gid'],
-        'project_title': project_info['project_title'] or metadata['upload_info']['spreadsheet_title'],
-        'production_company': project_info.get('production_company', ''),
-        'contact_phone': project_info.get('contact_phone', ''),
-        'project_date': project_date,
-        'director': metadata['metadata']['core_team'].get('director', ''),
-        'producer': metadata['metadata']['core_team'].get('producer', ''),
-        'writer': metadata['metadata']['core_team'].get('writer', ''),
-        'pre_prod_days': int(metadata['metadata']['timeline'].get('pre_prod_days', 0)),
-        'build_days': int(metadata['metadata']['timeline'].get('build_days', 0)),
-        'pre_light_days': int(metadata['metadata']['timeline'].get('pre_light_days', 0)),
-        'studio_days': int(metadata['metadata']['timeline'].get('studio_days', 0)),
-        'location_days': int(metadata['metadata']['timeline'].get('location_days', 0)),
-        'wrap_days': int(metadata['metadata']['timeline'].get('wrap_days', 0)),
-        'total_days': sum([
-            int(metadata['metadata']['timeline'].get('pre_prod_days', 0)),
-            int(metadata['metadata']['timeline'].get('build_days', 0)),
-            int(metadata['metadata']['timeline'].get('pre_light_days', 0)),
-            int(metadata['metadata']['timeline'].get('studio_days', 0)),
-            int(metadata['metadata']['timeline'].get('location_days', 0)),
-            int(metadata['metadata']['timeline'].get('wrap_days', 0))
-        ]),
-        'firm_bid_total_estimate': float(metadata['metadata']['financials']['grand_total']['estimated'].replace('$', '').replace(',', '')),
-        'firm_bid_total_actual': float(metadata['metadata']['financials']['grand_total']['actual'].replace('$', '').replace(',', '')),
-        'cost_plus_total_estimate': 0.0,  # TODO: Add cost plus totals
-        'cost_plus_total_actual': 0.0,
-        'grand_total_estimate': float(metadata['metadata']['financials']['grand_total']['estimated'].replace('$', '').replace(',', '')),
-        'grand_total_actual': float(metadata['metadata']['financials']['grand_total']['actual'].replace('$', '').replace(',', '')),
-        'grand_total_variance': float(metadata['metadata']['financials']['grand_total']['variance'].replace('$', '').replace(',', '')),
-        'client_total_actual': float(metadata['metadata']['financials']['grand_total']['client_actual'].replace('$', '').replace(',', '')),
-        'client_total_variance': float(metadata['metadata']['financials']['grand_total']['client_variance'].replace('$', '').replace(',', ''))
-    }
-
-def _parse_number(value: Any) -> float:
-    """Parse a number from a string, handling currency and percentage formats."""
-    if not value:
-        return 0.0
-    
-    # Convert to string and clean up
-    str_value = str(value).strip()
-    
-    # Handle percentages
-    if str_value.endswith('%'):
-        return float(str_value.rstrip('%')) / 100.0
-        
-    # Handle parentheses notation for negative numbers
-    is_negative = str_value.startswith('(') and str_value.endswith(')')
-    if is_negative:
-        str_value = str_value[1:-1]  # Remove parentheses
-        
-    # Handle currency and clean up
-    cleaned = str_value.replace('$', '').replace(',', '')
-    
-    try:
-        result = float(cleaned or 0)
-        return -result if is_negative else result
-    except ValueError:
-        return 0.0
-
-def prepare_detail_records(rows: list, metadata: dict, version_hash: str) -> list:
-    """Prepare budget detail records from processed rows."""
-    current_time = datetime.utcnow().isoformat()
-    upload_timestamp = current_time
-    
-    # Use same project ID generation logic as extract_project_info
-    base_name = metadata['metadata']['project_info']['project_title'] or metadata['upload_info']['spreadsheet_title']
-    project_id = f"{base_name}_{datetime.now().strftime('%Y%m%d')}"
-    project_id = ''.join(c if c.isalnum() else '_' for c in project_id)
-    budget_id = f"{project_id}_{datetime.now().strftime('%H%M%S')}"
-    
-    detail_records = []
-    for row in rows:
-        if not row.get('class_code') or not row.get('line_item_number'):
-            continue
-            
-        line_item_id = f"{budget_id}_{row['class_code']}_{row['line_item_number']}"
-        
-        detail_records.append({
-            'budget_id': budget_id,
-            'project_id': project_id,
-            'line_item_id': line_item_id,
-            'upload_timestamp': upload_timestamp,
-            'created_at': current_time,  # TODO: Track actual creation time
-            'class_code': row['class_code'],
-            'class_name': row['class_name'],
-            'line_item_number': int(row['line_item_number']),
-            'line_item_description': row['line_item_description'],
-            'estimate_days': _parse_number(row.get('estimate_days')),
-            'estimate_rate': _parse_number(row.get('estimate_rate')),
-            'estimate_ot_rate': _parse_number(row.get('estimate_ot_rate')),
-            'estimate_ot_hours': _parse_number(row.get('estimate_ot_hours')),
-            'estimate_total': _parse_number(row.get('estimate_total')),
-            'calculated_estimate_total': _parse_number(row.get('calculated_estimate_total')),
-            'estimate_variance': _parse_number(row.get('estimate_variance')),
-            'actual_days': _parse_number(row.get('actual_days')),
-            'actual_rate': _parse_number(row.get('actual_rate')),
-            'actual_total': _parse_number(row.get('actual_total')),
-            'calculated_actual_total': _parse_number(row.get('calculated_actual_total')),
-            'actual_variance': _parse_number(row.get('actual_variance')),
-            'class_total_estimate': _parse_number(row.get('class_total_estimate')),
-            'class_total_actual': _parse_number(row.get('class_total_actual')),
-            'class_pnw_estimate': _parse_number(row.get('class_pnw_estimate')),
-            'class_pnw_actual': _parse_number(row.get('class_pnw_actual')),
-            'class_pnw_rate': _parse_number(row.get('class_pnw_rate')),
-            'notes': row.get('notes', ''),
-            'is_subtotal': bool(row.get('is_subtotal', False))
-        })
-    
-    return detail_records
-
-def prepare_validation_records(validation_results: list, metadata: dict) -> list:
-    """Prepare validation records."""
-    project_id = metadata['upload_info']['id'].split('_')[0]
-    budget_id = metadata['upload_info']['id']
-    validation_timestamp = datetime.utcnow().isoformat()
-    
-    validation_records = []
-    for result in validation_results:
-        validation_records.append({
-            'budget_id': budget_id,
-            'project_id': project_id,
-            'validation_id': f"{budget_id}_validation_{generate_version_hash(result)}",
-            'upload_timestamp': metadata['upload_info']['timestamp'],
-            'validation_timestamp': validation_timestamp,
-            'validation_type': result['type'],
-            'severity': result['severity'],
-            'message': result['message'],
-            'class_code': result.get('class_code'),
-            'line_item_id': result.get('line_item_id'),
-            'field_name': result.get('field_name'),
-            'expected_value': str(result.get('expected_value', '')),
-            'actual_value': str(result.get('actual_value', ''))
-        })
-    
-    return validation_records
-
-def process_single_budget(budget_processor: BudgetProcessor, bigquery_service: BigQueryService, budget_config: Dict[str, Any]) -> bool:
-    """Process a single budget and upload to BigQuery."""
-    try:
-        logger.info("\n" + "="*80)
-        logger.info(f"🔄 PROCESSING BUDGET: {budget_config['description']}")
-        logger.info(f"📄 Spreadsheet ID: {budget_config['spreadsheet_id']}")
-        logger.info(f"📑 Sheet GID: {budget_config['sheet_gid']}")
-        logger.info("="*80 + "\n")
-
-        # Process budget data
-        processed_rows, metadata = budget_processor.process_budget(
-            budget_config['spreadsheet_id'], 
-            budget_config['sheet_gid']
-        )
-        
-        # Generate version hash
-        version_hash = generate_version_hash({
-            'metadata': metadata,
-            'rows': processed_rows
-        })
-        
-        # Create/update project record
-        project_info = extract_project_info(metadata)
-        project_id = bigquery_service.create_or_update_project(project_info)
-        
-        # Upload budget record
-        budget_record = prepare_budget_record(metadata, version_hash)
-        budget_id = bigquery_service.upload_budget(budget_record)
-        
-        # Upload budget details
-        detail_records = prepare_detail_records(processed_rows, metadata, version_hash)
-        detail_count = bigquery_service.upload_budget_details(detail_records)
-        
-        # Upload validation results if any
-        if metadata.get('validation_results'):
-            validation_records = prepare_validation_records(
-                metadata['validation_results'],
-                metadata
-            )
-            validation_count = bigquery_service.upload_validations(validation_records)
-        else:
-            validation_count = 0
-        
-        # Generate output filename
-        output_filename = f"output/processed_budget_{metadata['upload_info']['id']}.json"
-        
-        # Ensure output directory exists
-        Path('output').mkdir(parents=True, exist_ok=True)
-        
-        # Save results locally
-        with open(output_filename, 'w') as f:
-            json.dump({
-                'metadata': metadata,
-                'rows': processed_rows,
-                'bigquery_sync': {
-                    'project_id': project_id,
-                    'budget_id': budget_id,
-                    'detail_rows_uploaded': detail_count,
-                    'validation_rows_uploaded': validation_count,
-                    'version_hash': version_hash,
-                    'sync_timestamp': datetime.utcnow().isoformat()
-                }
-            }, f, indent=2)
-        
-        logger.info("\n" + "="*80)
-        logger.info(f"✅ COMPLETED PROCESSING: {budget_config['description']}")
-        logger.info(f"📁 Results saved to: {output_filename}")
-        logger.info(f"🆔 Project ID: {project_id}")
-        logger.info(f"📊 Budget ID: {budget_id}")
-        logger.info(f"📝 Detail rows: {detail_count}")
-        logger.info(f"⚠️  Validation rows: {validation_count}")
-        logger.info("="*80 + "\n")
-        
-        return True
-        
-    except Exception as e:
-        logger.error("\n" + "="*80)
-        logger.error(f"❌ ERROR PROCESSING: {budget_config['description']}")
-        logger.error(f"📄 Spreadsheet ID: {budget_config['spreadsheet_id']}")
-        logger.error(f"📑 Sheet GID: {budget_config['sheet_gid']}")
-        logger.error(f"❗ Error: {str(e)}")
-        logger.error("="*80 + "\n")
-        return False
+# Debug log environment variables
+logger.info(f"Loading environment from: {env_path}")
+logger.info(f"BIGQUERY_PROJECT_ID: {'Set' if os.getenv('BIGQUERY_PROJECT_ID') else 'Not Set'}")
+logger.info(f"BIGQUERY_DATASET_ID: {'Set' if os.getenv('BIGQUERY_DATASET_ID') else 'Not Set'}")
 
 def parse_google_sheets_url(url: str) -> Dict[str, str]:
-    """Parse a Google Sheets URL into spreadsheet_id and gid.
+    """Extract spreadsheet ID and GID from Google Sheets URL."""
+    logger.info(f"Parsed URL: {url}")
     
-    Example URL format:
-    https://docs.google.com/spreadsheets/d/1340FUfPqPWIlQu2H6W5D5JTAwxJYCeYIbjVSTWUeepU/edit?gid=803920845
-    """
-    try:
-        # Extract spreadsheet ID
-        spreadsheet_id = url.split('/d/')[1].split('/')[0]
-        
-        # Extract GID
-        gid = None
-        if 'gid=' in url:
-            gid = url.split('gid=')[1].split('&')[0].split('#')[0]
-        
-        logger.info(f"Parsed URL: {url}")
-        logger.info(f"Extracted spreadsheet_id: {spreadsheet_id}")
-        logger.info(f"Extracted GID: {gid}")
-        
-        return {
-            "spreadsheet_id": spreadsheet_id,
-            "sheet_gid": gid or "0",  # Default to first sheet if no GID
-            "description": f"Budget from spreadsheet {spreadsheet_id}"
-        }
-    except Exception as e:
-        raise ValueError(f"Invalid Google Sheets URL format: {url}") from e
+    # Extract spreadsheet ID
+    match = re.search(r'/spreadsheets/d/([a-zA-Z0-9-_]+)', url)
+    if not match:
+        raise ValueError("Invalid Google Sheets URL format")
+    spreadsheet_id = match.group(1)
+    logger.info(f"Extracted spreadsheet_id: {spreadsheet_id}")
+    
+    # Extract GID
+    match = re.search(r'[#&]gid=(\d+)', url)
+    if not match:
+        raise ValueError("No GID found in URL")
+    gid = match.group(1)
+    logger.info(f"Extracted GID: {gid}")
+    
+    return {
+        'spreadsheet_id': spreadsheet_id,
+        'gid': gid,
+        'description': f"Budget from spreadsheet {spreadsheet_id}"
+    }
 
-def main():
-    """Main entry point for budget processing script."""
+def clean_money_value(value: Any) -> float:
+    """Convert a monetary value (string or number) to float.
+    
+    Handles:
+    - Dollar signs ($)
+    - Commas in numbers
+    - Percentage signs (%)
+    - None values
+    - Empty strings
+    """
+    if value is None or value == '':
+        return 0.0
+    
+    if isinstance(value, (int, float)):
+        return float(value)
+    
+    # Convert string to float
     try:
-        # Load environment variables
-        load_dotenv()
-        
-        # Get required environment variables
-        bq_project_id = os.getenv('BIGQUERY_PROJECT_ID')
-        bq_dataset_id = os.getenv('BIGQUERY_DATASET_ID')
-        
-        if not all([bq_project_id, bq_dataset_id]):
-            raise ValueError("Missing required environment variables")
+        # Remove $ and % signs
+        value = str(value).replace('$', '').replace('%', '')
+        # Remove commas
+        value = value.replace(',', '')
+        # Convert to float
+        return float(value)
+    except (ValueError, TypeError):
+        logger.warning(f"Could not convert value '{value}' to float, using 0.0")
+        return 0.0
+
+def clean_date_value(value: Any) -> str:
+    """Convert a date value to YYYY-MM-DD format with fallback to today.
+    
+    Args:
+        value: Date value to clean (string or datetime)
+    
+    Returns:
+        str: Date in YYYY-MM-DD format
+    """
+    if not value:
+        return datetime.now().date().isoformat()
+    
+    try:
+        # If it's already a datetime
+        if isinstance(value, datetime):
+            return value.date().isoformat()
             
-        # Parse command line arguments
-        parser = argparse.ArgumentParser(description='Process AICP budgets and sync to BigQuery')
-        parser.add_argument('urls', nargs='+', help='One or more Google Sheets URLs to process')
-        args = parser.parse_args()
-        
-        # Parse URLs into budget configs
-        budgets = []
-        for url in args.urls:
+        # Try parsing common date formats
+        for fmt in ['%Y-%m-%d', '%m/%d/%Y', '%m-%d-%Y', '%d/%m/%Y', '%Y/%m/%d']:
             try:
-                budget_config = parse_google_sheets_url(url)
-                budgets.append(budget_config)
-            except ValueError as e:
-                logger.error(f"Skipping invalid URL: {url}")
-                logger.error(f"Error: {str(e)}")
+                return datetime.strptime(str(value), fmt).date().isoformat()
+            except ValueError:
                 continue
-            
-        if not budgets:
-            raise ValueError("No valid Google Sheets URLs provided")
-            
-        # Initialize services
-        budget_processor = BudgetProcessor()
-        bigquery_service = BigQueryService(bq_project_id, bq_dataset_id)
+                
+        # If no format matches, log warning and return today
+        logger.warning(f"Could not parse date value '{value}', using today's date")
+        return datetime.now().date().isoformat()
         
-        # Process each budget and track results
-        total_budgets = len(budgets)
-        successful_budgets = 0
-        failed_budgets = []
+    except Exception as e:
+        logger.warning(f"Error processing date value '{value}': {str(e)}, using today's date")
+        return datetime.now().date().isoformat()
+
+def safe_int_convert(value: Any, default: int = 0) -> int:
+    """Safely convert a value to integer with fallback to default."""
+    if value is None or value == '':
+        return default
+    try:
+        if isinstance(value, str):
+            # Remove any non-numeric characters (except negative sign)
+            cleaned = ''.join(c for c in value if c.isdigit() or c == '-')
+            return int(cleaned) if cleaned else default
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+def process_budgets():
+    """Process budgets from provided URLs."""
+    # Initialize counters
+    total_budgets = 0
+    successful_budgets = 0
+    failed_budgets = []
+    
+    try:
+        # Ensure URL is provided
+        if len(sys.argv) < 2:
+            raise ValueError("Please provide a Google Sheets URL as an argument")
         
-        logger.info("\n" + "="*80)
-        logger.info(f"🚀 STARTING BUDGET PROCESSING")
-        logger.info(f"📊 Total budgets to process: {total_budgets}")
-        logger.info("="*80 + "\n")
+        url = sys.argv[1]
+        total_budgets += 1
         
-        # Process each budget
-        for index, budget in enumerate(budgets, 1):
-            logger.info(f"\n🔄 Processing budget {index} of {total_budgets}")
+        try:
+            # Parse URL
+            budget_info = parse_google_sheets_url(url)
             
-            if process_single_budget(budget_processor, bigquery_service, budget):
-                successful_budgets += 1
+            # Process budget
+            processor = BudgetProcessor(
+                spreadsheet_id=budget_info['spreadsheet_id'],
+                gid=budget_info['gid']
+            )
+            
+            # Get sheet info first
+            sheet_info = processor._get_sheet_info(budget_info['spreadsheet_id'], budget_info['gid'])
+            budget = processor.process_budget()
+            
+            # Add detailed debug logging
+            logger.info("Budget processing complete")
+            logger.debug("Full budget structure:")
+            logger.debug(f"Keys in budget: {budget.keys() if budget else 'No budget'}")
+            logger.debug(f"Project Summary: {budget.get('project_summary') if budget else 'No project summary'}")
+            
+            if budget:
+                # Get project_name from the processed budget and budget_name from sheet_info
+                project_name = budget.get('project_summary', {}).get('project_info', {}).get('project_name')
+                budget_name = sheet_info['title']  # Use sheet title directly
+
+                logger.debug(f"Found project_name: {project_name}")
+                logger.debug(f"Found budget_name: {budget_name}")
+
+                if not project_name and not budget_name:
+                    raise ValueError("Both project_name and budget_name are missing")
+
+                # Use project_name or budget_name directly
+                project_title = project_name if project_name else budget_name
+                
+                # Ensure budget_name is set correctly
+                if not budget_name:
+                    raise ValueError("Budget name is missing")
+                
+                # Generate upload_id using sheet info
+                upload_id = processor._generate_upload_id(
+                    spreadsheet_title=sheet_info['spreadsheet_title'],
+                    sheet_title=sheet_info['title']
+                )
+                
+                # Prepare budget data for BigQuery with all required fields
+                budget_data = {
+                    # Required fields
+                    'budget_id': upload_id,
+                    'project_id': budget_info['spreadsheet_id'],
+                    'upload_timestamp': datetime.now(UTC).isoformat(),
+                    'version_hash': str(hash(str(budget.get('classes', {})))),
+                    'version_status': budget.get('version_status', 'draft'),
+                    'spreadsheet_id': budget_info['spreadsheet_id'],
+                    'sheet_name': budget_name,
+                    'sheet_gid': budget_info['gid'],
+                    'project_title': project_title,
+                    'total_days': int(budget.get('project_summary', {}).get('timeline', {}).get('total_days', 0)),
+                    'firm_bid_total_estimate': clean_money_value(budget.get('financials', {}).get('firm_bid', {}).get('estimated')),
+                    'cost_plus_total_estimate': clean_money_value(budget.get('financials', {}).get('grand_total', {}).get('estimated')),
+                    'grand_total_estimate': clean_money_value(budget.get('financials', {}).get('grand_total', {}).get('estimated')),
+                    
+                    # Optional fields
+                    'version_notes': '',
+                    'user_email': os.getenv('USER_EMAIL', 'user@example.com'),
+                    'production_company': budget.get('project_summary', {}).get('project_info', {}).get('production_company'),
+                    'contact_phone': budget.get('project_summary', {}).get('project_info', {}).get('contact_phone'),
+                    'project_date': clean_date_value(budget.get('project_summary', {}).get('project_info', {}).get('date')),
+                    'director': budget.get('project_summary', {}).get('core_team', {}).get('director'),
+                    'producer': budget.get('project_summary', {}).get('core_team', {}).get('producer'),
+                    'writer': budget.get('project_summary', {}).get('core_team', {}).get('writer'),
+                    'pre_prod_days': int(budget.get('project_summary', {}).get('timeline', {}).get('pre_prod_days', 0)),
+                    'build_days': int(budget.get('project_summary', {}).get('timeline', {}).get('build_days', 0)),
+                    'pre_light_days': int(budget.get('project_summary', {}).get('timeline', {}).get('pre_light_days', 0)),
+                    'studio_days': int(budget.get('project_summary', {}).get('timeline', {}).get('studio_days', 0)),
+                    'location_days': int(budget.get('project_summary', {}).get('timeline', {}).get('location_days', 0)),
+                    'wrap_days': int(budget.get('project_summary', {}).get('timeline', {}).get('wrap_days', 0)),
+                    'firm_bid_total_actual': clean_money_value(budget.get('financials', {}).get('firm_bid', {}).get('actual')),
+                    'cost_plus_total_actual': clean_money_value(budget.get('financials', {}).get('grand_total', {}).get('actual')),
+                    'grand_total_actual': clean_money_value(budget.get('financials', {}).get('grand_total', {}).get('actual')),
+                    'grand_total_variance': clean_money_value(budget.get('financials', {}).get('grand_total', {}).get('variance')),
+                    'client_total_actual': clean_money_value(budget.get('financials', {}).get('grand_total', {}).get('client_actual')),
+                    'client_total_variance': clean_money_value(budget.get('financials', {}).get('grand_total', {}).get('client_variance'))
+                }
+                
+                # Add debug logging before upload
+                logger.info("Preparing to upload budget data to BigQuery:")
+                logger.info(f"Budget data structure: {json.dumps(budget_data, indent=2)}")
+                
+                # Prepare budget details data
+                detail_rows = []
+                classes = budget.get('classes', {})
+                if not classes:
+                    logger.warning("No classes data found in budget")
+                
+                logger.info(f"Processing {len(classes)} budget classes for upload")
+                for class_code, budget_class in classes.items():
+                    logger.info(f"Processing class {class_code} for upload")
+                    logger.debug(f"Class data type: {type(budget_class)}")
+                    
+                    # Convert BudgetClass to dict if needed
+                    if hasattr(budget_class, 'line_items'):
+                        logger.info(f"Converting BudgetClass object to dictionary for {class_code}")
+                        line_items = budget_class.line_items
+                    else:
+                        logger.info(f"Using existing line items for {class_code}")
+                        line_items = budget_class.get('line_items', [])
+                    
+                    logger.info(f"Found {len(line_items)} line items in class {class_code}")
+                    
+                    for line_item in line_items:
+                        if not isinstance(line_item, dict):
+                            logger.warning(f"Skipping invalid line item in class {class_code}")
+                            continue
+                            
+                        # Debug log raw values
+                        logger.debug(f"Processing line item in class {class_code}:")
+                        logger.debug(f"  Raw estimate_days: {line_item.get('estimate_days')}")
+                        logger.debug(f"  Raw actual_days: {line_item.get('actual_days')}")
+                        logger.debug(f"  Raw estimate_rate: {line_item.get('estimate_rate')}")
+                        logger.debug(f"  Raw actual_rate: {line_item.get('actual_rate')}")
+                            
+                        detail_row = {
+                            # Required fields
+                            'budget_id': upload_id,
+                            'project_id': budget_info['spreadsheet_id'],
+                            'line_item_id': f"{upload_id}_{class_code}_{line_item.get('line_item_number', '')}",
+                            'upload_timestamp': datetime.now(UTC).isoformat(),
+                            'created_at': datetime.now(UTC).isoformat(),
+                            'class_code': class_code,
+                            'class_name': budget_class.class_name if hasattr(budget_class, 'class_name') else budget_class.get('class_name', ''),
+                            'line_item_number': line_item.get('line_item_number', ''),
+                            'line_item_description': line_item.get('line_item_description', ''),
+                            'is_subtotal': False,
+                            
+                            # Nullable fields
+                            'estimate_days': safe_int_convert(line_item.get('estimate_days')) if line_item.get('estimate_days') else None,
+                            'estimate_rate': clean_money_value(line_item.get('estimate_rate')) if line_item.get('estimate_rate') else None,
+                            'estimate_total': clean_money_value(line_item.get('estimate_total')) if line_item.get('estimate_total') else None,
+                            'actual_days': safe_int_convert(line_item.get('actual_days')) if line_item.get('actual_days') else None,
+                            'actual_rate': clean_money_value(line_item.get('actual_rate')) if line_item.get('actual_rate') else None,
+                            'actual_total': clean_money_value(line_item.get('actual_total')) if line_item.get('actual_total') else None
+                        }
+                        detail_rows.append(detail_row)
+                
+                logger.info(f"Prepared {len(detail_rows)} detail rows for upload")
+                
+                # Upload to BigQuery
+                if processor.bigquery_service:
+                    logger.info("Uploading budget data to BigQuery...")
+                    try:
+                        processor.bigquery_service.upload_budget(budget_data)
+                        processor.bigquery_service.upload_budget_details(detail_rows)
+                        logger.info("✓ Successfully uploaded budget data to BigQuery")
+                        successful_budgets += 1
+                    except Exception as e:
+                        logger.error("❌ Failed to upload to BigQuery:")
+                        logger.error(f"  Error: {str(e)}")
+                        failed_budgets.append(budget_info)
+                else:
+                    logger.warning("⚠️ BigQuery service not available - skipping upload")
+                    successful_budgets += 1
             else:
-                failed_budgets.append(budget['description'])
-        
+                raise Exception("Budget processing returned None")
+            
+        except Exception as e:
+            logger.error("\n" + "=" * 80)
+            logger.error(f"❌ ERROR PROCESSING: {budget_info['description']}")
+            logger.error(f"📄 Spreadsheet ID: {budget_info['spreadsheet_id']}")
+            logger.error(f"📑 Sheet GID: {budget_info['gid']}")
+            logger.error(f"❗ Error: {str(e)}")
+            logger.error("=" * 80 + "\n")
+            failed_budgets.append(budget_info)
+    
+    finally:
         # Print summary
-        logger.info("\n" + "="*80)
+        logger.info("\n" + "=" * 80)
         logger.info("📋 PROCESSING SUMMARY")
         logger.info(f"📊 Total budgets: {total_budgets}")
         logger.info(f"✅ Successfully processed: {successful_budgets}")
         logger.info(f"❌ Failed to process: {len(failed_budgets)}")
-        
         if failed_budgets:
             logger.info("\n❌ Failed budgets:")
             for budget in failed_budgets:
-                logger.info(f"   - {budget}")
-        
+                logger.info(f"   - {budget['description']}")
         logger.info("\n🏁 Processing complete!")
-        logger.info("="*80 + "\n")
+        logger.info("=" * 80 + "\n")
+
+def main():
+    """Main entry point."""
+    try:
+        # Get URL from command line argument
+        if len(sys.argv) < 2:
+            logger.error("❗ Error: Please provide a Google Sheets URL as an argument")
+            sys.exit(1)
             
+        url = sys.argv[1]
+        
+        # Parse URL to get spreadsheet ID and GID
+        try:
+            budget_info = parse_google_sheets_url(url)
+        except ValueError as e:
+            logger.error(f"❗ Error: {str(e)}")
+            sys.exit(1)
+            
+        # Initialize budget processor
+        processor = BudgetProcessor(
+            spreadsheet_id=budget_info['spreadsheet_id'],
+            gid=budget_info['gid']
+        )
+        
+        logger.info(f"Starting budget processing at {datetime.now(UTC).isoformat()}")
+        process_budgets()
     except Exception as e:
-        logger.error(f"Fatal error: {str(e)}")
+        logger.error(f"❗ Error: {str(e)}")
         sys.exit(1)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main() 
