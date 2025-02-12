@@ -16,6 +16,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from src.budget_sync.models.budget import Budget, BudgetClass
 from src.budget_sync.services.bigquery_service import BigQueryService
 from googleapiclient.errors import HttpError
+import re
 
 
 # Configure logging
@@ -641,6 +642,13 @@ class BudgetProcessor:
             logger.error(f"Error initializing budget processor: {str(e)}")
             raise
 
+    def _extract_row_from_cell(self, cell_ref: str) -> int:
+        """Extract the row number from a cell reference (e.g., 'L4' returns 4)."""
+        match = re.search(r'\d+', cell_ref)
+        if match:
+            return int(match.group())
+        return 0
+
     def _get_version_numbers(self, file_name: str, sheet_name: str, date_str: str, current_data: dict) -> tuple[int, int, int]:
         """Get version numbers based on file history and content changes."""
         try:
@@ -1176,6 +1184,26 @@ class BudgetProcessor:
         logger.info("✓ Cover sheet validated successfully (fallbacks applied if needed)")
         return cover_sheet_data
 
+    def fetch_raw_data(self) -> dict:
+        """Fetch raw data from the Google Sheet using a batchGet call for debugging purposes."""
+        try:
+            sheet_info = self._get_sheet_info(self.spreadsheet_id, self.gid)
+            sheet_title = sheet_info['title']
+            mapping = self.CLASS_MAPPINGS['COVER_SHEET']
+
+            # Build list of ranges - using project_info cells as example
+            ranges_to_fetch = []
+            for cell in mapping['project_info'].values():
+                ranges_to_fetch.append(f"'{sheet_title}'!{cell}")
+
+            logger.info(f"Fetching raw data with ranges: {ranges_to_fetch}")
+            raw_data = self._batch_get_values(self.spreadsheet_id, ranges_to_fetch, sheet_title)
+            logger.info(f"Raw data retrieved: {raw_data}")
+            return raw_data
+        except Exception as e:
+            logger.error(f"Error fetching raw data: {str(e)}")
+            return {}
+
     def process_sheet(self, spreadsheet_id: str, sheet_gid: str) -> Tuple[List[Dict], Dict]:
         """Process a single sheet from the spreadsheet."""
         try:
@@ -1374,7 +1402,10 @@ class BudgetProcessor:
             
         # Get all data including calculated totals
         data_range = f"'{sheet_title}'!{mapping['line_items_range']['start']}:{mapping['line_items_range']['end']}"
+        starting_row = self._extract_row_from_cell(mapping['line_items_range']['start'])
+        logger.debug(f"Class {class_code} starting row from mapping: {starting_row}")
         data_values = self._get_range_values(spreadsheet_id, data_range)
+        logger.debug(f"Class {class_code} data range: {data_range} retrieved {len(data_values)} rows")
         
         if not data_values:
             logger.warning(f"⚠️ No data values found for class {class_code}, skipping...")
@@ -1382,6 +1413,7 @@ class BudgetProcessor:
         
         # Get totals directly from cells
         class_totals = self._get_class_totals(spreadsheet_id, sheet_title, mapping)
+        logger.debug(f"Class {class_code} totals: {class_totals}")
         
         line_items = []
         # Process each line item

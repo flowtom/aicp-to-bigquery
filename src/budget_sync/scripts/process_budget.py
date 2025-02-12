@@ -132,10 +132,15 @@ def safe_int_convert(value: Any, default: int = 0) -> int:
 
 def process_budgets():
     """Process budgets from the Google Sheets using configuration from environment variables."""
-    # Example usage:
     print(f"Processing budget using Spreadsheet ID: {BUDGET_SPREADSHEET_ID} and Sheet GID: {BUDGET_SHEET_GID}")
-    # TODO: Add actual processing logic
-    return
+    try:
+        processor = BudgetProcessor(spreadsheet_id=BUDGET_SPREADSHEET_ID, gid=BUDGET_SHEET_GID)
+        raw_data = processor.fetch_raw_data()
+        print("Raw data retrieved:", raw_data)
+        return raw_data
+    except Exception as e:
+        print(f"Error processing budget: {str(e)}")
+        return None
 
 def main():
     """Main entry point."""
