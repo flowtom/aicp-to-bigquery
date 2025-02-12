@@ -23,20 +23,20 @@ This document outlines an extremely detailed, step-by-step plan to refactor the 
      - [x] Configure a shared logger (or import the existing logger) in `helpers.py` so that logging is consistent across all modules.
 
 2. **Develop an AWS Lambda Handler**  
-   - [ ] **Create a New File for the Lambda Handler (`lambda_handler.py`):**  
-     - [ ] Create `lambda_handler.py` in the project root.  
-     - [ ] Include necessary imports such as `json`, `logging`, and functions from `helpers.py`.
-   - [ ] **Define the `lambda_handler` Function:**  
-     - [ ] Implement the `lambda_handler(event, context)` function that:
-       - [ ] Logs the incoming event (convert the event to JSON for readability).
-       - [ ] Calls `extract_task_id_from_event(event)` to retrieve the `task_id`.
-       - [ ] Checks if `task_id` exists; if not, logs a warning and returns a 400 response with an error message.
-       - [ ] If `task_id` is found, calls `process_task(task_id)` and properly handles exceptions.
-       - [ ] Returns a response formatted for API Gateway with:
+   - [x] **Create a New File for the Lambda Handler (`lambda_handler.py`):**  
+     - [x] Create `lambda_handler.py` in the project root.  
+     - [x] Include necessary imports such as `json`, `logging`, and functions from `helpers.py`.
+   - [x] **Define the `lambda_handler` Function:**  
+     - [x] Implement the `lambda_handler(event, context)` function that:
+       - [x] Logs the incoming event (convert the event to JSON for readability).
+       - [x] Calls `extract_task_id_from_event(event)` to retrieve the `task_id`.
+       - [x] Checks if `task_id` exists; if not, logs a warning and returns a 400 response with an error message.
+       - [x] If `task_id` is found, calls `process_task(task_id)` and properly handles exceptions.
+       - [x] Returns a response formatted for API Gateway with:
          - `statusCode`: (e.g., 200, 400, or 500).
          - `body`: A JSON-stringified object containing status, `task_id`, and either the job result or an error message.
-   - [ ] **Ensure API Gateway Compatibility:**  
-     - [ ] Confirm that the returned object from the Lambda handler matches the API Gateway expectations (i.e., includes both `statusCode` and `body`).
+   - [x] **Ensure API Gateway Compatibility:**  
+     - [x] Confirm that the returned object from the Lambda handler matches the API Gateway expectations (i.e., includes both `statusCode` and `body`).
 
 3. **Migrate Configuration Management to Environment Variables**  
    - [ ] **Identify All Local Configurations:**  

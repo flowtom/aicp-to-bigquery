@@ -346,3 +346,15 @@ The core business logic has been decoupled from request handling by creating a n
   - A shared logger is configured in `helpers.py` with a default StreamHandler and a consistent log format to ensure uniform logging throughout the modules.
 
 This refactoring step is an essential part of preparing the codebase for AWS Lambda deployment and improved maintainability.
+
+## AWS Lambda Handler
+
+A new file `lambda_handler.py` has been created at the project root to facilitate AWS Lambda deployment. This file defines the `lambda_handler` function that serves as the entry point for AWS Lambda. The key steps in the handler include:
+
+- Logging the incoming event (after converting it to JSON for readability).
+- Extracting the `task_id` from the event using `extract_task_id_from_event` from the helper module.
+- Validating the presence of the `task_id` and, if missing, returning a 400 response with an error message.
+- If the `task_id` is found, processing the task by calling `process_task(task_id)` and handling any exceptions that occur.
+- Returning a response formatted for API Gateway which includes a `statusCode` (e.g., 200, 400, or 500) and a JSON-stringified `body` that contains the status, task id, and result or error message.
+
+This design ensures that the Lambda function is both robust and compatible with API Gateway, making the deployment process smoother.
