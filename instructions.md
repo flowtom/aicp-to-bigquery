@@ -39,44 +39,44 @@ This document outlines an extremely detailed, step-by-step plan to refactor the 
      - [x] Confirm that the returned object from the Lambda handler matches the API Gateway expectations (i.e., includes both `statusCode` and `body`).
 
 3. **Migrate Configuration Management to Environment Variables**  
-   - [ ] **Identify All Local Configurations:**  
-     - [ ] Review `.env.template` and any configuration JSON files (e.g., `config/budget_list.json`) for settings such as:
+   - [x ] **Identify All Local Configurations:**  
+     - [ x] Review `.env.template` and any configuration JSON files (e.g., `config/budget_list.json`) for settings such as:
        - `GOOGLE_APPLICATION_CREDENTIALS`
        - `BIGQUERY_PROJECT_ID`
        - `BIGQUERY_DATASET_ID`
        - Any additional API keys or service-specific configurations.
-   - [ ] **Modify Code to Use Environment Variables:**  
-     - [ ] Replace file-based configuration reads with `os.environ.get('VARIABLE_NAME')` in all relevant modules.
-     - [ ] Document the expected values and formats in the project README.
-   - [ ] **Plan for AWS Secrets Manager Integration (Optional):**  
-     - [ ] Outline a method to store sensitive data (like service account keys) in AWS Secrets Manager.
-     - [ ] Add a placeholder function in `helpers.py` or a new module to demonstrate how secrets could be retrieved at runtime.
+   - [x ] **Modify Code to Use Environment Variables:**  
+     - [x ] Replace file-based configuration reads with `os.environ.get('VARIABLE_NAME')` in all relevant modules.
+     - [x ] Document the expected values and formats in the project README.
+   - [x ] **Plan for AWS Secrets Manager Integration (Optional):**  
+     - [x ] Outline a method to store sensitive data (like service account keys) in AWS Secrets Manager.
+     - [x ] Add a placeholder function in `helpers.py` or a new module to demonstrate how secrets could be retrieved at runtime.
 
 4. **Refactor Google Sheets API Calls to Optimize for Rate Limiting**  
-   - [ ] **Review Current API Call Implementation:**  
-     - [ ] Identify where individual cell calls are made (likely in `src/budget_sync/budget_processor.py`).
-   - [ ] **Implement Batch API Calls Using `batchGet`:**  
+   - [x ] **Review Current API Call Implementation:**  
+     - [x ] Identify where individual cell calls are made (likely in `src/budget_sync/budget_processor.py`).
+   - [x ] **Implement Batch API Calls Using `batchGet`:**  
      - [ ] Write or refactor a function (e.g., `get_sheet_data(service, spreadsheet_id, ranges, max_retries=5)`) that:
-       - [ ] Uses the Google Sheets API's `batchGet` method to fetch multiple ranges in a single request.
-       - [ ] Accepts a list of cell ranges (e.g., `['A1', 'B2', 'C3']`) and returns the combined results.
-   - [ ] **Integrate Exponential Backoff:**  
-     - [ ] Within the `get_sheet_data` function, add retry logic that:
-       - [ ] Catches `HttpError` exceptions.
-       - [ ] Checks for status codes 429 or 503.
-       - [ ] Implements exponential backoff using `time.sleep(2 ** retry)`.
-       - [ ] Raises an error if maximum retries are exceeded.
-   - [ ] **Optionally Create a Decorator for Retry Logic:**  
-     - [ ] Develop a reusable decorator that can be applied to any external API call to centralize retry logic.
+       - [x ] Uses the Google Sheets API's `batchGet` method to fetch multiple ranges in a single request.
+       - [x ] Accepts a list of cell ranges (e.g., `['A1', 'B2', 'C3']`) and returns the combined results.
+   - [x ] **Integrate Exponential Backoff:**  
+     - [x ] Within the `get_sheet_data` function, add retry logic that:
+       - [x ] Catches `HttpError` exceptions.
+       - [x ] Checks for status codes 429 or 503.
+       - [x ] Implements exponential backoff using `time.sleep(2 ** retry)`.
+       - [x ] Raises an error if maximum retries are exceeded.
+   - [x ] **Optionally Create a Decorator for Retry Logic:**  
+     - [x ] Develop a reusable decorator that can be applied to any external API call to centralize retry logic.
 
 5. **Enhance Logging and Error Handling Across the Application**  
-   - [ ] **Consolidate Logging Setup:**  
-     - [ ] Create a shared logging configuration file (e.g., `logger_config.py`) to set up and export a unified logger.
-     - [ ] Ensure that all modules (including `helpers.py`, `lambda_handler.py`, etc.) import and use this logger.
-   - [ ] **Standardize Error Handling:**  
-     - [ ] Define common error response formats in helper functions.
-     - [ ] Refactor try/except blocks to log errors consistently at the appropriate levels (INFO, WARNING, ERROR).
-   - [ ] **Test Logging Output:**  
-     - [ ] Simulate both successful and failure scenarios locally to verify that logging outputs are comprehensive and clear.
+   - [x ] **Consolidate Logging Setup:**  
+     - [x ] Create a shared logging configuration file (e.g., `logger_config.py`) to set up and export a unified logger.
+     - [x ] Ensure that all modules (including `helpers.py`, `lambda_handler.py`, etc.) import and use this logger.
+   - [x ] **Standardize Error Handling:**  
+     - [x ] Define common error response formats in helper functions.
+     - [x ] Refactor try/except blocks to log errors consistently at the appropriate levels (INFO, WARNING, ERROR).
+   - [x ] **Test Logging Output:**  
+     - [x ] Simulate both successful and failure scenarios locally to verify that logging outputs are comprehensive and clear.
 
 6. **Set Up Unit Tests and Local Simulation for AWS Lambda**  
    - [ ] **Expand the Test Suite in the `tests/` Directory:**  
