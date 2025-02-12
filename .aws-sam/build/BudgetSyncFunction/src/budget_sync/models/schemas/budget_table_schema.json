@@ -1,0 +1,200 @@
+[
+    {
+        "name": "budget_id",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "Primary key - unique identifier for this budget upload"
+    },
+    {
+        "name": "project_id",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "Foreign key to projects table"
+    },
+    {
+        "name": "upload_timestamp",
+        "type": "TIMESTAMP",
+        "mode": "REQUIRED",
+        "description": "When this budget was uploaded"
+    },
+    {
+        "name": "version_hash",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "Hash of the data for version tracking"
+    },
+    {
+        "name": "user_email",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "Email of the user who uploaded the budget"
+    },
+    {
+        "name": "version_status",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "Status of this version (draft/final)"
+    },
+    {
+        "name": "version_notes",
+        "type": "STRING",
+        "mode": "NULLABLE",
+        "description": "Notes about this version"
+    },
+    {
+        "name": "spreadsheet_id",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "Google Sheets spreadsheet ID"
+    },
+    {
+        "name": "sheet_name",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "Name of the sheet within spreadsheet"
+    },
+    {
+        "name": "sheet_gid",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "GID of the sheet within spreadsheet"
+    },
+    {
+        "name": "project_title",
+        "type": "STRING",
+        "mode": "REQUIRED",
+        "description": "Title of the project"
+    },
+    {
+        "name": "production_company",
+        "type": "STRING",
+        "mode": "NULLABLE",
+        "description": "Name of the production company"
+    },
+    {
+        "name": "contact_phone",
+        "type": "STRING",
+        "mode": "NULLABLE",
+        "description": "Contact phone number"
+    },
+    {
+        "name": "project_date",
+        "type": "DATE",
+        "mode": "NULLABLE",
+        "description": "Project date from cover sheet"
+    },
+    {
+        "name": "director",
+        "type": "STRING",
+        "mode": "NULLABLE",
+        "description": "Project director"
+    },
+    {
+        "name": "producer",
+        "type": "STRING",
+        "mode": "NULLABLE",
+        "description": "Project producer"
+    },
+    {
+        "name": "writer",
+        "type": "STRING",
+        "mode": "NULLABLE",
+        "description": "Project writer"
+    },
+    {
+        "name": "pre_prod_days",
+        "type": "INTEGER",
+        "mode": "NULLABLE",
+        "description": "Number of pre-production days"
+    },
+    {
+        "name": "build_days",
+        "type": "INTEGER",
+        "mode": "NULLABLE",
+        "description": "Number of build days"
+    },
+    {
+        "name": "pre_light_days",
+        "type": "INTEGER",
+        "mode": "NULLABLE",
+        "description": "Number of pre-light days"
+    },
+    {
+        "name": "studio_days",
+        "type": "INTEGER",
+        "mode": "NULLABLE",
+        "description": "Number of studio days"
+    },
+    {
+        "name": "location_days",
+        "type": "INTEGER",
+        "mode": "NULLABLE",
+        "description": "Number of location days"
+    },
+    {
+        "name": "wrap_days",
+        "type": "INTEGER",
+        "mode": "NULLABLE",
+        "description": "Number of wrap days"
+    },
+    {
+        "name": "total_days",
+        "type": "INTEGER",
+        "mode": "REQUIRED",
+        "description": "Total number of production days"
+    },
+    {
+        "name": "firm_bid_total_estimate",
+        "type": "FLOAT",
+        "mode": "REQUIRED",
+        "description": "Total firm bid estimate"
+    },
+    {
+        "name": "firm_bid_total_actual",
+        "type": "FLOAT",
+        "mode": "NULLABLE",
+        "description": "Total firm bid actual"
+    },
+    {
+        "name": "cost_plus_total_estimate",
+        "type": "FLOAT",
+        "mode": "REQUIRED",
+        "description": "Total cost plus estimate"
+    },
+    {
+        "name": "cost_plus_total_actual",
+        "type": "FLOAT",
+        "mode": "NULLABLE",
+        "description": "Total cost plus actual"
+    },
+    {
+        "name": "grand_total_estimate",
+        "type": "FLOAT",
+        "mode": "REQUIRED",
+        "description": "Grand total estimate"
+    },
+    {
+        "name": "grand_total_actual",
+        "type": "FLOAT",
+        "mode": "NULLABLE",
+        "description": "Grand total actual"
+    },
+    {
+        "name": "grand_total_variance",
+        "type": "FLOAT",
+        "mode": "NULLABLE",
+        "description": "Variance between grand total estimate and actual"
+    },
+    {
+        "name": "client_total_actual",
+        "type": "FLOAT",
+        "mode": "NULLABLE",
+        "description": "Grand total actual amount billed to client"
+    },
+    {
+        "name": "client_total_variance",
+        "type": "FLOAT",
+        "mode": "NULLABLE",
+        "description": "Variance between grand total estimate and client actual"
+    }
+] 

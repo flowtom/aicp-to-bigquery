@@ -1,0 +1,15 @@
+[
+  {"name": "upload_id", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "budget_name", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "upload_timestamp", "type": "TIMESTAMP", "mode": "REQUIRED"},
+  {"name": "user_email", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "version_status", "type": "STRING", "mode": "REQUIRED", "description": "e.g., Draft, Final, Client Approved"},
+  {"name": "project_name", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "project_start_date", "type": "DATE", "mode": "REQUIRED"},
+  {"name": "project_end_date", "type": "DATE", "mode": "REQUIRED"},
+  {"name": "client_name", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "producer_name", "type": "STRING", "mode": "REQUIRED"},
+  {"name": "version_notes", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "xero_integration_status", "type": "STRING", "mode": "NULLABLE", "description": "TO DO: Add Xero integration fields"},
+  {"name": "previous_version_id", "type": "STRING", "mode": "NULLABLE", "description": "Reference to previous version's upload_id"}
+] 

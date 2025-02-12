@@ -1,7 +1,7 @@
 # test_data_utils.py
 import unittest
 from datetime import datetime
-from src.utils.data_utils import safe_float_convert, process_budget_row
+from budget_sync.utils.data_utils import safe_float_convert, process_budget_row
 
 class TestDataUtils(unittest.TestCase):
     def setUp(self):

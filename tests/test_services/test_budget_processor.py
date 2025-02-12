@@ -4,7 +4,7 @@ Tests for the budget processor service.
 import pytest
 from unittest.mock import Mock, patch
 from datetime import datetime
-from src.services.budget_processor import BudgetProcessor
+from budget_sync.services.budget_processor import BudgetProcessor
 
 @pytest.fixture
 def mock_sheets_data():
