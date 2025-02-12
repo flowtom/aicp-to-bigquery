@@ -15,6 +15,7 @@ from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from src.budget_sync.models.budget import Budget, BudgetClass
 from src.budget_sync.services.bigquery_service import BigQueryService
+from googleapiclient.errors import HttpError
 
 
 # Configure logging
@@ -1527,4 +1528,53 @@ class BudgetProcessor:
 
         except Exception as e:
             logger.error(f"❌ Unexpected error: {str(e)}")
-            return None 
+            return None
+
+def retry_on_http_error(max_retries=5, backoff_factor=2, status_codes=(429, 503)):
+    """Decorator to retry a function on specific HTTP errors with exponential backoff.
+
+    Args:
+        max_retries: Maximum number of retries.
+        backoff_factor: Factor for exponential backoff.
+        status_codes: Tuple of HTTP status codes to retry on.
+
+    Returns:
+        Decorated function with retry logic.
+    """
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except HttpError as error:
+                    if error.resp.status in status_codes:
+                        wait_time = backoff_factor ** attempt
+                        logger.warning(f"HTTP error {error.resp.status} occurred. Retrying in {wait_time} seconds...")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"HttpError occurred: {error}")
+                        raise
+            logger.error("Max retries exceeded.")
+            return None
+        return wrapper
+    return decorator
+
+# Example usage of the decorator
+@retry_on_http_error()
+def get_sheet_data(service, spreadsheet_id, ranges):
+    """Fetch data from Google Sheets using batchGet with retry logic.
+
+    Args:
+        service: The Sheets API service instance.
+        spreadsheet_id: The ID of the spreadsheet to retrieve data from.
+        ranges: A list of ranges to retrieve from the spreadsheet.
+
+    Returns:
+        A dictionary containing the requested data.
+    """
+    request = service.spreadsheets().values().batchGet(
+        spreadsheetId=spreadsheet_id,
+        ranges=ranges
+    )
+    response = request.execute()
+    return response 

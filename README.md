@@ -347,14 +347,31 @@ The core business logic has been decoupled from request handling by creating a n
 
 This refactoring step is an essential part of preparing the codebase for AWS Lambda deployment and improved maintainability.
 
-## AWS Lambda Handler
+## AWS Lambda Deployment and Configuration Management
 
-A new file `lambda_handler.py` has been created at the project root to facilitate AWS Lambda deployment. This file defines the `lambda_handler` function that serves as the entry point for AWS Lambda. The key steps in the handler include:
+### AWS Lambda Handler
 
-- Logging the incoming event (after converting it to JSON for readability).
-- Extracting the `task_id` from the event using `extract_task_id_from_event` from the helper module.
-- Validating the presence of the `task_id` and, if missing, returning a 400 response with an error message.
-- If the `task_id` is found, processing the task by calling `process_task(task_id)` and handling any exceptions that occur.
-- Returning a response formatted for API Gateway which includes a `statusCode` (e.g., 200, 400, or 500) and a JSON-stringified `body` that contains the status, task id, and result or error message.
+A new file `lambda_handler.py` has been created at the project root to serve as the AWS Lambda entry point. This file defines the `lambda_handler` function which:
 
-This design ensures that the Lambda function is both robust and compatible with API Gateway, making the deployment process smoother.
+- Logs incoming events (after converting them to JSON for clarity).
+- Extracts the `task_id` from the event using the `extract_task_id_from_event` function from `helpers.py`.
+- Validates the presence of the `task_id`; if absent, it logs a warning and returns a 400 HTTP response with an appropriate error message.
+- If the `task_id` is found, it calls the `process_task` function to process the task and handles any exceptions that occur.
+- Returns a response formatted for API Gateway with a proper `statusCode`, headers (with `Content-Type: application/json`), and a JSON-stringified `body` containing the status, task id, and either the job result or an error message.
+
+### Configuration Management via Environment Variables
+
+The application's configuration has been migrated from file-based configurations to environment variables to enhance portability and security. Key changes include:
+
+- **General Configuration:**
+  - Sensitive and environment-specific parameters, such as `GOOGLE_APPLICATION_CREDENTIALS`, `BIGQUERY_PROJECT_ID`, `BIGQUERY_DATASET_ID`, `BUDGET_SPREADSHEET_ID`, and `BUDGET_SHEET_GID`, are now read using `os.environ.get()`.
+- **Module Specific Updates:**
+  - In `src/budget_sync/clickup/job_creator.py`, configuration values are loaded from environment variables.
+  - In the scripts (`process_budget.py` and `test_run.py`), configuration details related to spreadsheet IDs and other settings are now fetched from the environment instead of configuration files.
+  - In `src/budget_sync/api/routes.py`, instead of loading configuration from a JSON file, the required values such as `PROJECT_ID` and `PROJECT_NUMBER` are obtained via environment variables.
+
+### AWS Secrets Manager Integration (Optional)
+
+A placeholder function `get_secret` has been added to `helpers.py` to outline the integration with AWS Secrets Manager. This function demonstrates how sensitive data (e.g., service account keys) can be securely retrieved at runtime using the boto3 library. It attempts to parse secrets as JSON where applicable.
+
+These updates are crucial for deploying the application on AWS Lambda and ensure that configuration management is both secure and scalable.
