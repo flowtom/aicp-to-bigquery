@@ -6,17 +6,8 @@ This module centralizes functions for parameter extraction and core task process
 Future implementations will extract parameters from Lambda events and process tasks accordingly.
 """
 
-import logging
+from src.budget_sync.logger_config import logger
 import json
-
-logger = logging.getLogger(__name__)
-
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
 
 # TODO: Implement helper functions such as extract_task_id_from_event and process_task
 
@@ -93,3 +84,23 @@ def get_secret(secret_name, region_name="us-east-1"):
     except ClientError as e:
         logger.error(f"Error retrieving secret {secret_name}: {e}")
         return None 
+
+def create_error_response(status_code, message, task_id=None):
+    """Create a standardized error response for API Gateway.
+
+    Args:
+        status_code (int): The HTTP status code for the response.
+        message (str): The error message to include in the response.
+        task_id (str, optional): The task ID related to the error, if applicable.
+
+    Returns:
+        dict: A dictionary representing the API Gateway response.
+    """
+    response_body = {"error": message}
+    if task_id:
+        response_body["task_id"] = task_id
+    return {
+        "statusCode": status_code,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(response_body)
+    } 

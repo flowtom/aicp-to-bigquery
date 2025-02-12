@@ -1,15 +1,7 @@
 import json
-import logging
+from src.budget_sync.logger_config import logger
 
-from helpers import extract_task_id_from_event, process_task
-
-logger = logging.getLogger(__name__)
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+from helpers import extract_task_id_from_event, process_task, create_error_response
 
 
 def lambda_handler(event, context):
@@ -23,21 +15,13 @@ def lambda_handler(event, context):
     task_id = extract_task_id_from_event(event)
     if not task_id:
         logger.warning("Task ID not found in event")
-        return {
-            "statusCode": 400,
-            "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({"error": "Task ID not provided in event"})
-        }
+        return create_error_response(400, "Task ID not provided in event")
 
     try:
         result = process_task(task_id)
         if result is None:
             logger.error("Processing task %s failed.", task_id)
-            return {
-                "statusCode": 500,
-                "headers": {"Content-Type": "application/json"},
-                "body": json.dumps({"error": "Task processing failed", "task_id": task_id})
-            }
+            return create_error_response(500, "Task processing failed", task_id)
         else:
             return {
                 "statusCode": 200,
@@ -46,8 +30,4 @@ def lambda_handler(event, context):
             }
     except Exception as e:
         logger.exception("Unexpected error processing task %s: %s", task_id, e)
-        return {
-            "statusCode": 500,
-            "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({"error": "Unexpected error", "task_id": task_id})
-        } 
+        return create_error_response(500, "Unexpected error", task_id) 
