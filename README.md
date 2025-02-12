@@ -325,3 +325,24 @@ The dataset ID for use in code will be: `budget-sync-db.budget_data`
    - Go to service account details
    - Create new key (JSON)
    - Save as `config/bigquery-service-account-key.json`
+
+## Helper Module Refactoring
+
+The core business logic has been decoupled from request handling by creating a new helper module `helpers.py`. This module centralizes parameter extraction, task processing, and logging to ensure consistency across the application.
+
+### Key Changes:
+
+- **helpers.py Module:**
+  - Contains the function `extract_task_id_from_event(event)` which extracts the `task_id` from incoming Lambda events by:
+    - Checking `event['pathParameters']` for a `task_id`.
+    - Parsing the JSON body (`json.loads(event['body'])`) if necessary.
+    - Logging the extraction process using a shared logger.
+
+  - Contains the function `process_task(task_id)` which:
+    - Invokes `create_job_from_task(task_id)` from `src/budget_sync/clickup/job_creator.py`.
+    - Uses a try/except block to catch, log, and handle any exceptions, returning the result for further processing.
+
+- **Consistent Logging:**
+  - A shared logger is configured in `helpers.py` with a default StreamHandler and a consistent log format to ensure uniform logging throughout the modules.
+
+This refactoring step is an essential part of preparing the codebase for AWS Lambda deployment and improved maintainability.
