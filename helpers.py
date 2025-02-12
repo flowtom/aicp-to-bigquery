@@ -60,4 +60,36 @@ def process_task(task_id):
         return result
     except Exception as e:
         logger.error('Error processing task %s: %s', task_id, e)
+        return None
+
+def get_secret(secret_name, region_name="us-east-1"):
+    """Retrieve a secret from AWS Secrets Manager.
+    
+    Args:
+        secret_name (str): The name of the secret.
+        region_name (str): The AWS region where the secret is stored (default 'us-east-1').
+    
+    Returns:
+        dict or str: The secret value parsed as a JSON dictionary if possible, or the raw string value.
+    """
+    import boto3
+    from botocore.exceptions import ClientError
+    
+    # Create a Secrets Manager client
+    client = boto3.client('secretsmanager', region_name=region_name)
+    
+    try:
+        response = client.get_secret_value(SecretId=secret_name)
+        if 'SecretString' in response:
+            secret = response['SecretString']
+            try:
+                # Try to parse the secret as JSON
+                return json.loads(secret)
+            except json.JSONDecodeError:
+                return secret
+        else:
+            # If the secret is binary
+            return response['SecretBinary']
+    except ClientError as e:
+        logger.error(f"Error retrieving secret {secret_name}: {e}")
         return None 

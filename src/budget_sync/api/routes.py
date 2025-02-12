@@ -5,13 +5,13 @@ import tempfile
 import os
 import json
 
-def load_config():
-    with open('config/config.json', 'r') as f:
-        return json.load(f)
+# Load API configuration from environment variables
+API_HOST = os.environ.get('API_HOST', '0.0.0.0')
+API_PORT = int(os.environ.get('API_PORT', '8080'))
 
-config = load_config()
-PROJECT_ID = config['project_id']
-PROJECT_NUMBER = config['project_number']
+# Replace file-based configuration with environment variables
+PROJECT_ID = os.environ.get('PROJECT_ID', 'your-default-project-id')
+PROJECT_NUMBER = os.environ.get('PROJECT_NUMBER', 'your-default-project-number')
 
 app = Flask(__name__)
 processor = AICPBudgetProcessor(project_id=PROJECT_ID)
@@ -50,4 +50,4 @@ def process_budget():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080))) 
+    app.run(host=API_HOST, port=API_PORT) 
