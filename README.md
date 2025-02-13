@@ -403,3 +403,44 @@ To deploy the application to AWS Lambda, follow these steps:
    - The project includes a GitHub Actions workflow to automatically run tests on pushes and pull requests, ensuring code quality and functionality.
 
 Refer to the `template.yaml` file for AWS SAM configuration if you choose to use AWS SAM for deployment instead of the manual zip method.
+
+## Cover Sheet Helper
+
+The Cover Sheet helper is a dedicated module that processes the Cover Sheet data from a Google Sheet. It leverages the Google Sheets API to fetch data in batch mode and transforms the raw cell values into a structured JSON format. This data includes project information, core team details, timeline milestones, and financial summaries, which are then merged into the overall budget data.
+
+### COVER_SHEET_MAPPING Structure
+
+The `COVER_SHEET_MAPPING` is a blueprint that defines which cells in the Google Sheet correspond to specific pieces of information. Its main sections include:
+
+- **project_info**: Maps cells for details such as the project title, production company, contact phone, and the project date. For example, `'project_title': 'C5'` indicates that cell C5 holds the project title.
+
+- **core_team**: Specifies the cells that contain the names of key team members (e.g., director, producer, writer).
+
+- **timeline**: Defines cells associated with various timeline milestones (e.g., pre-production days, build days, wrap days).
+
+- **firm_bid_summary**: Contains sub-sections like `pre_production_wrap` and `shooting_crew_labor`, each mapping several financial fields (estimated costs, actual costs, variance, etc.).
+
+- **grand_total**: Maps the summary totals for the project, including estimated, actual, and variance values.
+
+The mapping keys correspond directly to cell addresses in the Google Sheet. This layout ensures that if the structure of the Google Sheet changes, you only need to update the mapping rather than modifying the code logic throughout the project.
+
+### Running Tests and Verifying Cover Sheet Data
+
+To run tests that verify the Cover Sheet data, you can use the provided test scripts (e.g., `src/budget_sync/scripts/test_cover_sheet_processor.py`). These tests exercise the Cover Sheet helper functions and validate the processed JSON output. 
+
+For manual verification, you can also run the budget processing script. For example:
+
+```bash
+python src/budget_sync/scripts/process_budget.py "<YOUR_GOOGLE_SHEET_URL>" > output.json
+```
+
+After running the script, inspect `output.json` to ensure:
+
+- The `project_summary` key exists and contains the expected fields (project title, production company, etc.).
+- The financials section under the Cover Sheet shows correctly formatted monetary values.
+- Any missing values are handled with default fallbacks, as described in the internal documentation.
+
+### Assumptions and Known Limitations
+
+- **Assumptions**: It is assumed that the Google Sheet's Cover Sheet layout adheres to the structure defined in the `COVER_SHEET_MAPPING`. Any deviations may result in incorrect or missing data.
+- **Limitations**: This implementation relies heavily on the fixed cell addresses specified in the mapping. If the sheet layout is altered significantly, the mapping must be updated accordingly. Additionally, while there is error logging for unexpected values, some data inconsistencies may require manual intervention.

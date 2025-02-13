@@ -8,35 +8,40 @@ This document outlines an extremely detailed, step-by-step plan to refactor the 
    - [x] **Create a new helper module (`helpers.py`):**  
      - [x] Create a file named `helpers.py` in the project root or a shared module folder.  
      - [x] Add documentation at the top explaining that this module will centralize functions for parameter extraction and core task processing.
-   - [x] **Extract Task ID from Incoming Events:**  
-     - [x] Write a function `extract_task_id_from_event(event)` that:
-       - [x] Checks if `event['pathParameters']` exists and contains `task_id`.
-       - [x] If not found, parses the JSON body (`json.loads(event['body'])`) to retrieve `task_id`.
-       - [x] Optionally checks for form data if required.
-       - [x] Logs the extraction process using a shared logger.
-   - [x] **Wrap Core Task Processing:**  
-     - [x] Write a function `process_task(task_id)` that:
-       - [x] Invokes the existing `create_job_from_task(task_id)` from `src/budget_sync/clickup/job_creator.py`.
-       - [x] Implements try/except blocks to catch and log any exceptions.
-       - [x] Returns the result from `create_job_from_task` for further processing.
-   - [x] **Integrate Consistent Logging:**  
-     - [x] Configure a shared logger (or import the existing logger) in `helpers.py` so that logging is consistent across all modules.
+   - - [x ] **Update Extraction Logic for Webhook Payload:**  
+     - [x ] Write (or update) a function `extract_budget_url_from_event(event)` that:
+       - [x ] Checks for the presence of a key (e.g., `"budget_url"`) in the JSON payload of the webhook.
+       - [x ] Logs and validates that the URL is present and correctly formatted.
+     - [x ] If the URL is missing or malformed, log an appropriate error and return an error response.
+   - [ X] **Extract Spreadsheet ID and GID from the URL:**  
+     - [x ] Write a function `parse_spreadsheet_url(budget_url)` that:
+       - [x ] Uses regular expressions or URL parsing methods to extract the spreadsheet ID (the portion following `/d/` and before the next slash).
+       - [x ] Extracts the GID, typically found after `gid=` in the URL query string.
+       - [x ] Validates the extracted values (e.g., checks that the spreadsheet ID is non-empty and the GID is numeric or matches expected patterns).
+       - [x ] Logs the extracted spreadsheet ID and GID.
+   - [x ] **Wrap Core Task Processing:**  
+     - [x ] Write a function `process_task(budget_url)` that:
+       - [x ] Calls `parse_spreadsheet_url(budget_url)` to obtain the spreadsheet ID and GID.
+       - [x ] Passes these values into the job creation logic (i.e., calls `create_job_from_task` or a similarly named function), which now accepts the spreadsheet ID and GID.
+       - [x ] Catches and logs any exceptions and returns the processing result.
+   - [x ] **Integrate Consistent Logging:**  
+     - [x ] Ensure that all helper functions use a shared logger to maintain consistent log output across modules.
 
 2. **Develop an AWS Lambda Handler**  
    - [x] **Create a New File for the Lambda Handler (`lambda_handler.py`):**  
      - [x] Create `lambda_handler.py` in the project root.  
      - [x] Include necessary imports such as `json`, `logging`, and functions from `helpers.py`.
-   - [x] **Define the `lambda_handler` Function:**  
-     - [x] Implement the `lambda_handler(event, context)` function that:
-       - [x] Logs the incoming event (convert the event to JSON for readability).
-       - [x] Calls `extract_task_id_from_event(event)` to retrieve the `task_id`.
-       - [x] Checks if `task_id` exists; if not, logs a warning and returns a 400 response with an error message.
-       - [x] If `task_id` is found, calls `process_task(task_id)` and properly handles exceptions.
-       - [x] Returns a response formatted for API Gateway with:
-         - `statusCode`: (e.g., 200, 400, or 500).
-         - `body`: A JSON-stringified object containing status, `task_id`, and either the job result or an error message.
-   - [x] **Ensure API Gateway Compatibility:**  
-     - [x] Confirm that the returned object from the Lambda handler matches the API Gateway expectations (i.e., includes both `statusCode` and `body`).
+   - [x ] **Define the `lambda_handler` Function:**  
+     - [x ] Implement `lambda_handler(event, context)` that:
+       - [x ] Logs the incoming event (convert to JSON for readability).
+       - [x ] Calls `extract_budget_url_from_event(event)` to retrieve the `budget_url`.
+       - [x ] Validates that `budget_url` is present; if not, logs a warning and returns a 400 response.
+       - [x ] Calls `process_task(budget_url)` and handles any exceptions.
+       - [x ] Returns a response formatted for API Gateway with:
+         - `statusCode` (e.g., 200, 400, 500)
+         - `body` containing a JSON-stringified object with processing status, extracted spreadsheet ID and GID, and job creation results or error messages.
+   - [ ] **Ensure API Gateway Compatibility:**  
+     - [ ] Confirm that the returned object from the Lambda handler matches the API Gateway expectations (i.e., includes both `statusCode` and `body`).
 
 3. **Migrate Configuration Management to Environment Variables**  
    - [x ] **Identify All Local Configurations:**  
@@ -81,7 +86,9 @@ This document outlines an extremely detailed, step-by-step plan to refactor the 
 6. **Set Up Unit Tests and Local Simulation for AWS Lambda**  
    - [x ] **Expand the Test Suite in the `tests/` Directory:**  
      - [x ] Write unit tests for `extract_task_id_from_event(event)` using various simulated event formats (API Gateway event, raw JSON, form data).
-     - [x ] Create tests for `process_task(task_id)` ensuring it correctly calls `create_job_from_task` and handles exceptions.
+     - [ ] Write unit tests for `extract_budget_url_from_event(event)` using simulated event payloads.
+     - [ ] Write unit tests for `parse_spreadsheet_url(budget_url)` to verify correct extraction of spreadsheet ID and GID from various URL formats.
+     - [ ] Develop tests for `process_task(budget_url)` ensuring it correctly processes the URL and handles exceptions. 
      - [x ] Develop tests for the `lambda_handler` function to simulate different event inputs and expected HTTP responses.
    - [x ] **Simulate AWS Lambda Environment Locally:**  
      - [x ] Set up AWS SAM CLI or the Serverless Framework to run the Lambda function locally.
@@ -130,8 +137,169 @@ This document outlines an extremely detailed, step-by-step plan to refactor the 
    - [ ] **Create a Change Log or Deployment Notes:**  
      - [ ] Summarize all the changes made for portability, including refactoring details and integration steps for AWS Lambda and API Gateway.
 
----
 
-This detailed checklist should serve as a comprehensive guide for refactoring and deploying the AICP-to-BigQuery application to AWS Lambda. Each task is designed to be a discrete story point that can be individually tracked and completed by an AI coding agent or a development team.
+# Next Steps: Implementing Full Processing Logic in process_budgets()
 
-Happy coding!
+1. **Read Data from the Google Sheet**
+   - [X ] Update the `process_budgets()` function to call a method on your `BudgetProcessor` that fetches data from the Google Sheet.
+     - [X ] Use batched API calls (e.g., via `batchGet`) to minimize the number of API calls.
+     - [X ] Log the raw data retrieved for debugging purposes.
+
+2. **Process the Cell Mappings and Extract Information**
+   - [X ] In your `BudgetProcessor` class, implement methods that:
+     - [X ] Identify the starting points for each budget class (A through P) based on the non-standard layout.
+     - [X ] Parse line items for each class, reading estimates, actuals, subtotals, etc.
+     - [X ] Log intermediate results to verify that the correct cells are being processed.
+   - [X ] Ensure that the mapping logic accommodates any template changes or variations.
+
+3. **Validate and Transform Data into JSON Format**
+   - [X ] Add validation steps that check for:
+     - [X ] Missing or invalid fields.
+     - [X ] Consistency in numeric formats (e.g., ensuring money values are floats).
+     - [X ] Correct date formats using helper functions.
+   - [X ] Transform the validated data into your standardized JSON structure.
+     - [x ] Include metadata such as timestamps, versioning information, and any processing statistics.
+
+4. **Upload Processed Data to BigQuery**
+   - [x ] **Review Processed JSON Format:**
+     - [x ] Ensure that your final JSON output includes distinct sections for:
+       - Cover Sheet data (e.g., under the key `"cover_sheet"` or `"project_summary"`).
+       - Line items data (e.g., under the key `"line_items"` or similar).
+     - [x ] Confirm that a unique `budget_id` is generated and included in both sections.
+   - [x ] **Design Table Schemas:**
+     - [x ] Verify the schema for the "budgets" table (should include columns for all Cover Sheet fields plus a `budget_id`).
+     - [x ] Verify the schema for the "budget_details" table (should include columns for line item details plus a `budget_id` to join with the "budgets" table).
+   - [x ] **Document the Data Mapping:**
+     - [x ] Write documentation (or inline comments) mapping JSON keys to BigQuery table columns.
+     
+  4.1     **Format Processed Data for BigQuery Upload**
+    - [x ] **Develop a Function to Format Cover Sheet Data:**
+      - [x ] Create a function (e.g., `format_cover_sheet_for_bq(processed_data)`) that:
+        - [x ] Extracts the Cover Sheet portion from the processed JSON.
+        - [x ] Maps each field to the corresponding BigQuery column.
+        - [x ] Includes the common `budget_id` field.
+        - [x ] Returns a dictionary or row object formatted for BigQuery.
+    - [x ] **Develop a Function to Format Line Items Data:**
+      - [x ] Create a function (e.g., `format_line_items_for_bq(processed_data)`) that:
+        - [x ] Extracts the line items data from the processed JSON.
+        - [x ] Iterates over each line item, mapping the fields to the corresponding columns.
+        - [x ] Attaches the same `budget_id` to each row.
+        - [x ] Returns a list of dictionaries/row objects ready for batch insertion.
+
+  4.2  **Implement BigQuery Upload Logic**
+    - [x ] **Integrate with BigQuery Client Library:**
+      - [x ] Import and initialize the Google Cloud BigQuery client.
+      - [x ] Ensure that your environment variables (like `BIGQUERY_PROJECT_ID` and `BIGQUERY_DATASET_ID`) are correctly loaded.
+    - [x ] **Implement Upload Function for Cover Sheet:**
+      - [x ] Create a function (e.g., `upload_cover_sheet_to_bq(bq_client, cover_sheet_row)`) that:
+        - [x ] Uses `insert_rows_json` (or a similar API) to insert the cover sheet data into the "budgets" table.
+        - [x ] Implements error handling:
+          - [x ] If an error occurs (e.g., network issues, schema mismatch), log the error.
+          - [x ] Optionally implement retry logic with exponential backoff.
+        - [x ] Logs a success message upon successful upload.
+    - [x ] **Implement Upload Function for Line Items:**
+      - [x ] Create a function (e.g., `upload_line_items_to_bq(bq_client, line_items_rows)`) that:
+        - [x ] Uses `insert_rows_json` to batch insert line item rows into the "budget_details" table.
+        - [x ] Implements similar error handling and retry logic as for the cover sheet.
+        - [x ] Logs the number of rows inserted and any warnings or errors.
+    - [x ] **Integrate Upload Steps in Main Processing Flow:**
+      - [x ] In your main processing function (or `BudgetProcessor`), after processing and formatting the data:
+        - [x ] Call the cover sheet upload function and capture the result.
+        - [x ] Call the line items upload function and capture the result.
+        - [x ] Log the overall status and any relevant details for monitoring.
+
+  4.3 **Testing and Validation**
+    - [ x] **Local Testing:**
+      - [ x] Simulate the full processing pipeline locally (using SAM/Docker or direct command-line execution).
+      - [ x] Verify that both the cover sheet and line items data are correctly formatted and uploaded.
+    - [ x] **Mock BigQuery API Calls:**
+      - [ x] Write unit tests that mock BigQuery API calls to simulate insertion success and failure.
+      - [ x] Ensure that the error handling and retry logic behave as expected.
+    - [ x] **Review Logs:**
+      - [ x] Confirm that detailed logs are generated for each step of the upload process.
+      - [ x] Verify that errors, if any, are clearly logged with sufficient context for troubleshooting.
+
+  4.4  **Documentation and Finalization**
+    - [x ] **Update Project Documentation:**
+      - [x ] Add a section in the README or internal docs detailing:
+        - The data flow from processing to BigQuery upload.
+        - How the cover sheet and line items are mapped and related via `budget_id`.
+        - Any configuration needed for BigQuery (table names, schema details, etc.).
+    - [x ] **Deployment Notes:**
+      - [x ] Document how to set environment variables and credentials for BigQuery.
+      - [x ] Provide troubleshooting tips for common upload issues.
+    - [x ] **Version Control:**
+      - [x ] Commit your changes and document them in your change log.
+
+
+
+
+5. **Testing and Verification**
+   - [ ] Run local tests using SAM/Docker to simulate the entire flow.
+   - [ ] Verify that each step logs meaningful output and that the final output in BigQuery (or locally printed JSON) matches the expected format.
+   - [ ] Write unit tests for each of the newly implemented functions to ensure robustness.
+
+
+   BUG BUGS BUGS
+
+
+   Cover Sheet is not being processed.
+
+   1. **Review Current Processing Logic**
+   - [x ] Open the current `BudgetProcessor` (or equivalent) module.
+   - [x ] Identify existing logic that processes budget classes (A–P).
+   - [x ] Locate any existing code (or log statements) related to Cover_Sheet processing.
+   - [x ] Document where and how Cover_Sheet data was intended to be processed before it was inadvertently omitted.
+
+2. **Identify the Correct Range for Cover_Sheet**
+   - [x ] Confirm the cell range for the Cover_Sheet in your Google Sheet template.
+     - [x ] Verify the starting and ending cells (e.g., "Cover_Sheet!A1:D10" or similar).
+     - [x ] Note any specific formatting or key data points required for the Cover_Sheet.
+   - [x ] Update any configuration or constants (if applicable) to include the Cover_Sheet range.
+
+3. **Implement Separate Processing for Cover_Sheet**
+   - [x ] Create or update a function in `BudgetProcessor` (or in a helper module) called, for example, `_process_cover_sheet()`.
+     - [x ] The function should:
+       - [x ] Connect to the Google Sheets API using the appropriate range for the Cover_Sheet.
+       - [x ] Extract raw data from that range.
+       - [ ] Parse and transform the raw data into a structured JSON format (e.g., mapping specific cells to keys).
+       - [x ] Log the raw values and the processed output for debugging.
+   - [x ] Ensure that the function returns a JSON object (or dictionary) representing the Cover_Sheet data.
+   - [x ] Add unit tests for `_process_cover_sheet()` to confirm it returns the expected structure given a sample input.
+
+4. **Integrate Cover_Sheet Data into Final JSON Output**
+   - [x ] Update the main processing function (e.g., `process_budgets()`) to call the new `_process_cover_sheet()` method.
+     - [x ] Capture the returned JSON from `_process_cover_sheet()`.
+   - [x ] Modify the final output JSON object to include a key such as `"cover_sheet"` with the processed data.
+     - [x ] Example:
+       ```python
+       final_output = {
+           "cover_sheet": cover_sheet_data,   # Data from _process_cover_sheet()
+           "line_items": processed_line_items,  # Existing data for classes A–P
+           "metadata": { ... }                  # Additional processing metadata
+       }
+       ```
+   - [x ] Verify that when the processing logic runs, the final JSON now includes the Cover_Sheet data.
+
+5. **Add Detailed Logging and Error Handling**
+   - [x ] In `_process_cover_sheet()`, add logging statements that:
+     - [x ] Log the entry into the function and the specified range.
+     - [x ] Log raw data received from the API.
+     - [x ] Log the transformed output before returning it.
+   - [x ] Ensure any errors (e.g., if the range is empty or data is malformed) are caught and logged, and that the function returns a default structure or error message as needed.
+
+6. **Test the Updated Processing Flow Locally**
+   - [x ] Run your processing script (e.g., using SAM/Docker) with a sample Google Sheets URL that includes valid Cover_Sheet data.
+   - [x ] Examine the logs to verify that:
+     - [x ] "Cover_Sheet processed" is logged along with actual data.
+     - [x ] The final JSON output includes a non-empty `"cover_sheet"` field.
+   - [x ] If the Cover_Sheet data is still missing, review the defined cell range and the parsing logic.
+   - [x ] Update unit tests or add additional tests to simulate different Cover_Sheet scenarios.
+
+7. **Document the Changes**
+   - [x ] Update your project README and any internal documentation to describe:
+     - [x ] How Cover_Sheet data is now processed.
+     - [x ] The expected range and structure for the Cover_Sheet.
+     - [x ] Any new configuration values or environmental changes.
+   - [x ] Note any assumptions or limitations in the current implementation for future reference.
+

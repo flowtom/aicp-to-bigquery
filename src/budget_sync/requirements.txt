@@ -8,3 +8,9 @@ python-dotenv==1.0.0
 # For development/testing purposes
 pytest==7.3.1
 python-dotenv
+
+# Google libraries for the Budget Sync Lambda function
+google-api-python-client>=2.0.0
+google-cloud-bigquery>=3.0.0
+google-auth>=2.0.0
+google-auth-oauthlib>=0.4.0

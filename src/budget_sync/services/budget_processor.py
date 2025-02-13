@@ -1,7 +1,7 @@
 """
 Budget processor service for handling AICP budget data.
 """
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 import logging
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -17,6 +17,10 @@ from src.budget_sync.models.budget import Budget, BudgetClass
 from src.budget_sync.services.bigquery_service import BigQueryService
 from googleapiclient.errors import HttpError
 import re
+from src.budget_sync.services.cover_sheet_processor import cover_sheet_processor
+from google.cloud import bigquery
+from src.budget_sync.services.bq_uploader import format_cover_sheet_for_bq, format_line_items_for_bq
+from src.budget_sync.services.bq_upload_logic import upload_cover_sheet_to_bq, upload_line_items_to_bq
 
 
 # Configure logging
@@ -726,7 +730,7 @@ class BudgetProcessor:
         clean_sheet = '_'.join(''.join(c if c.isalnum() else ' ' for c in sheet_title).split())
         
         # Generate date string
-        date_str = datetime.now().strftime('%m-%d-%y')
+        date_str = datetime.now(timezone.utc).strftime('%m-%d-%y')
         
         # Get version numbers
         major, minor, patch = self._get_version_numbers(clean_file, clean_sheet, date_str, {})
@@ -1062,91 +1066,11 @@ class BudgetProcessor:
                 raise
 
     def _process_cover_sheet(self, spreadsheet_id: str, sheet_title: str) -> Dict:
-        """Process cover sheet data using batch request."""
-        mapping = self.CLASS_MAPPINGS['COVER_SHEET']
-        
-        # Collect all ranges we need to fetch
-        ranges_to_fetch = []
-        
-        # Project info ranges
-        for cell in mapping['project_info'].values():
-            ranges_to_fetch.append(f"'{sheet_title}'!{cell}")
-            
-        # Core team ranges
-        for cell in mapping['core_team'].values():
-            ranges_to_fetch.append(f"'{sheet_title}'!{cell}")
-            
-        # Timeline ranges
-        for cell in mapping['timeline'].values():
-            ranges_to_fetch.append(f"'{sheet_title}'!{cell}")
-            
-        # Firm bid ranges
-        for category in mapping['firm_bid_summary'].values():
-            for field in ['estimated', 'actual', 'variance', 'client_actual', 'client_variance']:
-                if field in category:
-                    ranges_to_fetch.append(f"'{sheet_title}'!{category[field]}")
-                    
-        # Grand total ranges
-        for field in ['estimated', 'actual', 'variance', 'client_actual', 'client_variance']:
-            if field in mapping['grand_total']:
-                ranges_to_fetch.append(f"'{sheet_title}'!{mapping['grand_total'][field]}")
-        
-        # Fetch all values in one batch request
-        batch_values = self._batch_get_values(spreadsheet_id, ranges_to_fetch, sheet_title)
-        
-        # Process project info
-        project_info = {}
-        for field, cell in mapping['project_info'].items():
-            range_key = f"'{sheet_title}'!{cell}"
-            value = batch_values.get(range_key, [''])[0] or ""
-            project_info[field] = value
-        
-        # Process core team
-        core_team = {}
-        for role, cell in mapping['core_team'].items():
-            range_key = f"'{sheet_title}'!{cell}"
-            value = batch_values.get(range_key, [''])[0] or ""
-            core_team[role] = value
-        
-        # Process timeline
-        timeline = {}
-        for milestone, cell in mapping['timeline'].items():
-            range_key = f"'{sheet_title}'!{cell}"
-            value = batch_values.get(range_key, ['0'])[0] or "0"
-            timeline[milestone] = value
-        
-        # Process firm bid summary
-        firm_bid = {}
-        for category, details in mapping['firm_bid_summary'].items():
-            firm_bid[category] = {
-                'description': details['description'],
-                'categories': details['categories']
-            }
-            for field in ['estimated', 'actual', 'variance', 'client_actual', 'client_variance']:
-                if field in details:
-                    range_key = f"'{sheet_title}'!{details[field]}"
-                    value = batch_values.get(range_key, ['$0.00'])[0]
-                    firm_bid[category][field] = self._format_money(value)
-        
-        # Process grand total
-        grand_total = {'description': mapping['grand_total']['description']}
-        for field in ['estimated', 'actual', 'variance', 'client_actual', 'client_variance']:
-            if field in mapping['grand_total']:
-                range_key = f"'{sheet_title}'!{mapping['grand_total'][field]}"
-                value = batch_values.get(range_key, ['$0.00'])[0]
-                grand_total[field] = self._format_money(value)
-        
-        return {
-            'project_summary': {
-                'project_info': project_info,
-                'core_team': core_team,
-                'timeline': timeline
-            },
-            'financials': {
-                'firm_bid': firm_bid,
-                'grand_total': grand_total
-            }
-        }
+        """Process Cover Sheet data by delegating to the cover_sheet_processor module."""
+        logger.info(f"[Cover_Sheet] Processing cover sheet for sheet: {sheet_title}")
+        processed_data = cover_sheet_processor.process_cover_sheet(self.sheets_service, spreadsheet_id, sheet_title)
+        logger.info(f"[Cover_Sheet] Processed cover sheet data: {processed_data}")
+        return processed_data
 
     def _format_money(self, value: Any) -> str:
         """Format number as money string."""
@@ -1238,7 +1162,7 @@ class BudgetProcessor:
             
             # Get version info
             clean_file = '_'.join(''.join(c if c.isalnum() else ' ' for c in sheet_title).split())
-            date_str = datetime.now().strftime('%m-%d-%y')
+            date_str = datetime.now(timezone.utc).strftime('%m-%d-%y')
             
             # Get version numbers
             major, minor, patch = self._get_version_numbers(clean_file, sheet_title, date_str, {})
@@ -1252,7 +1176,7 @@ class BudgetProcessor:
                     'spreadsheet_title': sheet_title,
                     'sheet_title': sheet_title,
                     'sheet_gid': sheet_gid,
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
                     'version': version_str,
                     'first_seen': self._get_first_seen_date(clean_file, sheet_title),
                     'last_updated': date_str
@@ -1284,10 +1208,10 @@ class BudgetProcessor:
                 
             key = f"{clean_file}-{clean_sheet}"
             if key in tracking_data:
-                return tracking_data[key].get('first_seen', datetime.now().strftime('%m-%d-%y'))
-            return datetime.now().strftime('%m-%d-%y')
+                return tracking_data[key].get('first_seen', datetime.now(timezone.utc).strftime('%m-%d-%y'))
+            return datetime.now(timezone.utc).strftime('%m-%d-%y')
         except:
-            return datetime.now().strftime('%m-%d-%y')
+            return datetime.now(timezone.utc).strftime('%m-%d-%y')
 
     def _get_range_values(self, spreadsheet_id: str, range_name: str) -> list:
         """Fetch values for a specific range with retry logic."""
@@ -1326,6 +1250,7 @@ class BudgetProcessor:
                 values = []
                 for value_range in result.get('valueRanges', []):
                     values.append(value_range.get('values', []))
+                
                 return values
                 
             except Exception as e:
@@ -1473,7 +1398,6 @@ class BudgetProcessor:
         """Process budget with enhanced validation and error handling."""
         try:
             logger.info(f"Processing budget from sheet {self.spreadsheet_id}")
-            
             try:
                 sheet_info = self._get_sheet_info(self.spreadsheet_id, self.gid)
             except ValueError as e:
@@ -1481,51 +1405,41 @@ class BudgetProcessor:
                 return None
 
             try:
-                # Process cover sheet
                 cover_sheet_data = self._process_cover_sheet(self.spreadsheet_id, sheet_info['title'])
-                
-                # Double-check cover_sheet_data exists before using it
                 if not cover_sheet_data:
                     logger.warning("⚠️ cover_sheet_data is empty! Using default values.")
-                    cover_sheet_data = {}  # Prevents it from being None
-                
+                    cover_sheet_data = {}
+
                 validated_data = self._validate_cover_sheet(cover_sheet_data, sheet_info['spreadsheet_title'])
 
                 if not isinstance(validated_data, dict):
                     raise ValueError("Cover sheet validation returned a non-dict type")
 
                 logger.info("✓ Cover sheet processed successfully")
-                
-                # Process budget classes
+
                 classes = {}
                 logger.info(f"Starting to process budget classes...")
                 logger.info(f"Found {len([k for k in self.CLASS_MAPPINGS.keys() if k != 'COVER_SHEET'])} classes to process")
-                
+
                 for class_code, mapping in self.CLASS_MAPPINGS.items():
-                    if class_code == 'COVER_SHEET':  # Skip cover sheet mapping
+                    if class_code == 'COVER_SHEET':
                         continue
-                        
+
                     try:
                         logger.info(f"🔍 Processing budget class: {class_code}...")
                         logger.debug(f"Using mapping: {json.dumps(mapping, indent=2)}")
-                        
-                        # Get class header to check if class exists
+
                         header_range = f"'{sheet_info['title']}'!{mapping['class_code_cell']}:{mapping['class_name_cell']}"
                         header_values = self._get_range_values(self.spreadsheet_id, header_range)
-                        
+
                         if not header_values:
                             logger.info(f"⚠️ Class {class_code} header not found at {header_range}, skipping.")
                             continue
-                            
+
                         logger.info(f"Found class header: {header_values}")
-                        
-                        class_data = self._process_class(
-                            self.spreadsheet_id,
-                            sheet_info['title'],
-                            class_code,
-                            mapping
-                        )
-                        
+
+                        class_data = self._process_class(self.spreadsheet_id, sheet_info['title'], class_code, mapping)
+
                         if class_data:
                             classes[class_code] = class_data
                             logger.info(f"✅ Successfully processed class {class_code}")
@@ -1538,20 +1452,25 @@ class BudgetProcessor:
                         logger.error(f"❌ Error processing class {class_code}: {str(e)}")
                         import traceback
                         logger.error(f"Traceback: {traceback.format_exc()}")
-                
+
                 logger.info(f"Completed class processing. Found {len(classes)} valid classes.")
-                
+
                 # Combine all data
                 budget_data = {
                     'upload_id': self._generate_upload_id(sheet_info['spreadsheet_title'], sheet_info['title']),
-                    'upload_timestamp': datetime.now(UTC),
+                    'upload_timestamp': datetime.now(timezone.utc).isoformat(),
                     'version_status': 'draft',
                     'sheet_title': sheet_info['title'],
                     'project_summary': validated_data.get('project_summary', {}),
                     'financials': validated_data.get('financials', {}),
-                    'classes': classes
+                    'classes': classes,
+                    'processing_summary': {
+                        'total_rows': sum(len(c.line_items) for c in classes.values() if hasattr(c, 'line_items')),
+                        'processed_classes': list(classes.keys()),
+                        'validation_issues': sum(1 for c in classes.values() for li in getattr(c, 'line_items', []) if li.get('validation_status') != 'valid')
+                    }
                 }
-
+                logger.info("Final merged budget data: " + json.dumps(budget_data, indent=2, default=str))
                 return budget_data
 
             except ValueError as e:
@@ -1561,6 +1480,101 @@ class BudgetProcessor:
         except Exception as e:
             logger.error(f"❌ Unexpected error: {str(e)}")
             return None
+
+    def validate_and_transform_budget(self, budget_data: Dict) -> Dict:
+        """Validate the processed budget data and transform it into a standardized JSON structure."""
+        project_info = budget_data.get("project_summary", {})
+        if not project_info.get("project_title"):
+            logger.warning("Missing project_title, defaulting to 'Untitled Project'")
+            project_info["project_title"] = "Untitled Project"
+
+        upload_timestamp = budget_data.get("upload_timestamp")
+        if upload_timestamp and not isinstance(upload_timestamp, str):
+            try:
+                budget_data["upload_timestamp"] = upload_timestamp.isoformat()
+            except Exception as e:
+                logger.warning(f"Error formatting upload_timestamp: {e}")
+                budget_data["upload_timestamp"] = datetime.now(timezone.utc).isoformat()
+
+        def convert_money(value):
+            try:
+                if isinstance(value, str):
+                    value = value.replace('$', '').replace(',', '')
+                return float(value)
+            except Exception:
+                return 0.0
+
+        financials = budget_data.get("financials", {})
+        if "firm_bid" in financials:
+            for cat in financials["firm_bid"]:
+                for field in ["estimated", "actual", "variance", "client_actual", "client_variance"]:
+                    if field in financials["firm_bid"][cat]:
+                        original_value = financials["firm_bid"][cat][field]
+                        financials["firm_bid"][cat][field] = convert_money(original_value)
+        if "grand_total" in financials:
+            for field in ["estimated", "actual", "variance", "client_actual", "client_variance"]:
+                if field in financials["grand_total"]:
+                    original_value = financials["grand_total"][field]
+                    financials["grand_total"][field] = convert_money(original_value)
+
+        final_json = {
+            "upload_id": budget_data.get("upload_id", ""),
+            "upload_timestamp": budget_data.get("upload_timestamp", ""),
+            "version_status": budget_data.get("version_status", ""),
+            "spreadsheet_title": budget_data.get("sheet_title", ""),
+            "project_summary": project_info,
+            "financials": financials,
+            "classes": {},
+            "processing_summary": budget_data.get("processing_summary", {})
+        }
+
+        classes = budget_data.get("classes", {})
+        for key, budget_class in classes.items():
+            if hasattr(budget_class, "__dataclass_fields__"):
+                from dataclasses import asdict
+                final_json["classes"][key] = asdict(budget_class)
+            elif hasattr(budget_class, "__dict__"):
+                final_json["classes"][key] = budget_class.__dict__
+            else:
+                final_json["classes"][key] = budget_class
+
+        return final_json
+
+    def upload_to_bigquery(self, processed_data: dict) -> bool:
+        """
+        Uploads the processed budget data (cover sheet and line items) to BigQuery.
+        Uses formatting functions to generate rows and then upload functions to insert them into BigQuery tables.
+        Returns True if both uploads succeed, False otherwise.
+        """
+        from google.cloud import bigquery
+        from src.budget_sync.services.bq_uploader import format_cover_sheet_for_bq, format_line_items_for_bq
+        from src.budget_sync.services.bq_upload_logic import upload_cover_sheet_to_bq, upload_line_items_to_bq
+        import os
+        
+        try:
+            bq_client = self.bigquery_service if self.bigquery_service is not None else bigquery.Client()
+        except Exception as e:
+            logger.error(f"Error initializing BigQuery client: {e}")
+            return False
+        
+        dataset_id = os.environ.get('BIGQUERY_DATASET_ID')
+        # Use environment variables for table names, with defaults
+        budgets_table_id = os.environ.get('BUDGETS_TABLE_ID', 'budgets')
+        budget_details_table_id = os.environ.get('BUDGET_DETAILS_TABLE_ID', 'budget_details')
+        
+        # Format data for BigQuery
+        cover_sheet_row = format_cover_sheet_for_bq(processed_data)
+        line_items_rows = format_line_items_for_bq(processed_data)
+        
+        cover_sheet_success = upload_cover_sheet_to_bq(bq_client, dataset_id, budgets_table_id, cover_sheet_row)
+        line_items_success = upload_line_items_to_bq(bq_client, dataset_id, budget_details_table_id, line_items_rows)
+        
+        if cover_sheet_success and line_items_success:
+            logger.info("Processed budget data uploaded to BigQuery successfully.")
+            return True
+        else:
+            logger.error("Failed to upload budget data to BigQuery.")
+            return False
 
 def retry_on_http_error(max_retries=5, backoff_factor=2, status_codes=(429, 503)):
     """Decorator to retry a function on specific HTTP errors with exponential backoff.

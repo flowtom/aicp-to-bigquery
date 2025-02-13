@@ -3,7 +3,7 @@ Script to process budget data from Google Sheets and sync to BigQuery.
 """
 import logging
 import sys
-from datetime import datetime, UTC, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 import re
 from src.budget_sync.services.budget_processor import BudgetProcessor
@@ -11,6 +11,7 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 import json
+import argparse
 
 # Set up logging first
 logging.basicConfig(level=logging.INFO)
@@ -95,7 +96,7 @@ def clean_date_value(value: Any) -> str:
         str: Date in YYYY-MM-DD format
     """
     if not value:
-        return datetime.now().date().isoformat()
+        return datetime.now(timezone.utc).date().isoformat()
     
     try:
         # If it's already a datetime
@@ -111,11 +112,11 @@ def clean_date_value(value: Any) -> str:
                 
         # If no format matches, log warning and return today
         logger.warning(f"Could not parse date value '{value}', using today's date")
-        return datetime.now().date().isoformat()
+        return datetime.now(timezone.utc).date().isoformat()
         
     except Exception as e:
         logger.warning(f"Error processing date value '{value}': {str(e)}, using today's date")
-        return datetime.now().date().isoformat()
+        return datetime.now(timezone.utc).date().isoformat()
 
 def safe_int_convert(value: Any, default: int = 0) -> int:
     """Safely convert a value to integer with fallback to default."""
@@ -142,34 +143,44 @@ def process_budgets():
         print(f"Error processing budget: {str(e)}")
         return None
 
-def main():
-    """Main entry point."""
-    try:
-        # Get URL from command line argument
-        if len(sys.argv) < 2:
-            logger.error("❗ Error: Please provide a Google Sheets URL as an argument")
-            sys.exit(1)
-            
-        url = sys.argv[1]
-        
-        # Parse URL to get spreadsheet ID and GID
-        try:
-            budget_info = parse_google_sheets_url(url)
-        except ValueError as e:
-            logger.error(f"❗ Error: {str(e)}")
-            sys.exit(1)
-            
-        # Initialize budget processor
-        processor = BudgetProcessor(
-            spreadsheet_id=budget_info['spreadsheet_id'],
-            gid=budget_info['gid']
-        )
-        
-        logger.info(f"Starting budget processing at {datetime.now(UTC).isoformat()}")
-        process_budgets()
-    except Exception as e:
-        logger.error(f"❗ Error: {str(e)}")
-        sys.exit(1)
+def extract_spreadsheet_details(url: str) -> tuple:
+    """Extracts the spreadsheet ID and sheet GID from a Google Sheets URL."""
+    # Extract the spreadsheet ID
+    match = re.search(r'/d/([a-zA-Z0-9-_]+)', url)
+    if not match:
+        raise ValueError(f"Invalid URL: Spreadsheet ID not found in '{url}'")
+    spreadsheet_id = match.group(1)
+    
+    # Extract the sheet GID (either from query parameter or fragment)
+    match_gid = re.search(r'(?:\?|#)gid=([0-9]+)', url)
+    if not match_gid:
+        raise ValueError(f"Invalid URL: Sheet GID not found in '{url}'")
+    sheet_gid = match_gid.group(1)
+    return spreadsheet_id, sheet_gid
 
-if __name__ == "__main__":
-    main() 
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Process budget from Google Sheets.')
+    parser.add_argument('--url', help='Google Sheets URL to process', required=False)
+    parser.add_argument('--config', help='Path to configuration file', required=False)
+    args = parser.parse_args()
+
+    if args.url:
+        try:
+            spreadsheet_id, sheet_gid = extract_spreadsheet_details(args.url)
+            print(f"Extracted spreadsheet_id: {spreadsheet_id}, sheet_gid: {sheet_gid}")
+        except Exception as e:
+            print(f"Error extracting details from URL: {e}")
+            sys.exit(1)
+        
+        # Initialize the BudgetProcessor with extracted details
+        from src.budget_sync.services.budget_processor import BudgetProcessor
+        processor = BudgetProcessor(spreadsheet_id, sheet_gid)
+        
+        # Process the budget (this may include processing and uploading stages)
+        processed_data = processor.process_budget()
+        if processed_data:
+            print("Budget processed successfully.")
+        else:
+            print("Budget processing failed.")
+    else:
+        parser.print_help() 

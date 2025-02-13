@@ -1,10 +1,16 @@
 """
 Tests for the budget processor service.
 """
+import os
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'src')))
+
 import pytest
 from unittest.mock import Mock, patch
 from datetime import datetime
 from budget_sync.services.budget_processor import BudgetProcessor
+
+import unittest
 
 @pytest.fixture
 def mock_sheets_data():
@@ -135,3 +141,12 @@ def test_process_line_item(processor):
         assert result['class_name'] == current_class['name']
         assert 'upload_timestamp' in result
         assert 'budget_name' in result 
+
+class TestBudgetProcessor(unittest.TestCase):
+    def test_some_functionality(self):
+        # Dummy test for demonstration
+        bp = BudgetProcessor('dummy_spreadsheet_id', 'dummy_gid')
+        self.assertIsNotNone(bp)
+
+if __name__ == '__main__':
+    unittest.main() 
