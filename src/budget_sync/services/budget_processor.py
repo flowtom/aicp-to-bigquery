@@ -13,11 +13,11 @@ import os
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
-from src.budget_sync.models.budget import Budget, BudgetClass
+from src.budget_sync.models.budget import Budget, BudgetClass, BudgetLineItem, ValidationResult
 from src.budget_sync.services.bigquery_service import BigQueryService
 from googleapiclient.errors import HttpError
 import re
-from src.budget_sync.services.cover_sheet_processor import cover_sheet_processor
+from src.budget_sync.services.cover_sheet_processor import process_cover_sheet
 from google.cloud import bigquery
 from src.budget_sync.services.bq_uploader import format_cover_sheet_for_bq, format_line_items_for_bq
 from src.budget_sync.services.bq_upload_logic import upload_cover_sheet_to_bq, upload_line_items_to_bq
@@ -604,11 +604,18 @@ class BudgetProcessor:
                 'https://www.googleapis.com/auth/drive'
             ]
 
+            # If running in Lambda, copy token.json to /tmp
+            if os.environ.get('AWS_LAMBDA_FUNCTION_NAME'):
+                if os.path.exists('token.json'):
+                    import shutil
+                    shutil.copy2('token.json', '/tmp/token.json')
+                    logger.info("Copied token.json to /tmp for Lambda use")
+
             creds = None
             # The file token.json stores the user's access and refresh tokens, and is
             # created automatically when the authorization flow completes for the first time.
-            if os.path.exists('token.json'):
-                with open('token.json', 'r') as token:
+            if os.path.exists('/tmp/token.json'):
+                with open('/tmp/token.json', 'r') as token:
                     creds_data = json.load(token)
                     creds = Credentials.from_authorized_user_info(creds_data, SCOPES)
 
@@ -617,11 +624,17 @@ class BudgetProcessor:
                 if creds and creds.expired and creds.refresh_token:
                     creds.refresh(Request())
                 else:
-                    flow = InstalledAppFlow.from_client_secrets_file(
-                        'credentials.json', SCOPES)
-                    creds = flow.run_local_server(port=0)
+                    # Check if we're running in Lambda
+                    if os.environ.get('AWS_LAMBDA_FUNCTION_NAME'):
+                        raise ValueError("No valid credentials found. Please run OAuth flow locally first.")
+                    else:
+                        # We're running locally, so we can do the OAuth flow
+                        flow = InstalledAppFlow.from_client_secrets_file(
+                            'credentials.json', SCOPES)
+                        creds = flow.run_local_server(port=0)
                 # Save the credentials for the next run
-                with open('token.json', 'w') as token:
+                token_path = '/tmp/token.json' if os.environ.get('AWS_LAMBDA_FUNCTION_NAME') else 'token.json'
+                with open(token_path, 'w') as token:
                     token.write(creds.to_json())
 
             logger.info(f"Using OAuth2 credentials for spreadsheet {spreadsheet_id}")
@@ -1031,18 +1044,16 @@ class BudgetProcessor:
         max_retries = 5
         base_delay = 2
         
-        # Ensure budget_name is valid before requesting data
         budget_name = sheet_title if sheet_title else "Fallback_Sheet_Name"
         formatted_ranges = []
         for cell in ranges:
-            if '!' in cell:  # If it already contains a sheet title, don't prepend
+            if '!' in cell:
                 formatted_ranges.append(cell)
             else:
                 formatted_ranges.append(f"'{budget_name}'!{cell}")
 
-        # Debug log to check the constructed ranges
-        logging.debug(f"Batch request using sheet_title: {sheet_title}")
-        logging.debug(f"Ranges requested: {formatted_ranges}")
+        logger.debug(f"Batch request using sheet_title: {sheet_title}")
+        logger.debug(f"Ranges requested: {formatted_ranges}")
         
         for attempt in range(max_retries):
             try:
@@ -1051,7 +1062,6 @@ class BudgetProcessor:
                     ranges=formatted_ranges
                 ).execute()
                 
-                # Convert to dictionary for easier access
                 return {
                     entry['range']: entry.get('values', [['']])[0] 
                     for entry in result.get('valueRanges', [])
@@ -1059,8 +1069,11 @@ class BudgetProcessor:
             except Exception as e:
                 if 'RATE_LIMIT_EXCEEDED' in str(e) and attempt < max_retries - 1:
                     delay = base_delay * (2 ** attempt)
-                    logger.info(f"Rate limit hit, waiting {delay}s before retry {attempt + 1}/{max_retries}")
+                    logger.warning(f"🚫 Rate limit exceeded for batch request")
+                    logger.warning(f"⏳ Attempt {attempt + 1}/{max_retries}: Waiting {delay} seconds")
+                    logger.debug(f"Requested {len(formatted_ranges)} ranges: {formatted_ranges}")
                     time.sleep(delay)
+                    logger.info(f"▶️ Resuming after {delay}s wait")
                     continue
                 logger.error(f"Error in batch request: {str(e)}")
                 raise
@@ -1068,7 +1081,7 @@ class BudgetProcessor:
     def _process_cover_sheet(self, spreadsheet_id: str, sheet_title: str) -> Dict:
         """Process Cover Sheet data by delegating to the cover_sheet_processor module."""
         logger.info(f"[Cover_Sheet] Processing cover sheet for sheet: {sheet_title}")
-        processed_data = cover_sheet_processor.process_cover_sheet(self.sheets_service, spreadsheet_id, sheet_title)
+        processed_data = process_cover_sheet(self.sheets_service, spreadsheet_id, sheet_title)
         logger.info(f"[Cover_Sheet] Processed cover sheet data: {processed_data}")
         return processed_data
 
@@ -1215,8 +1228,8 @@ class BudgetProcessor:
 
     def _get_range_values(self, spreadsheet_id: str, range_name: str) -> list:
         """Fetch values for a specific range with retry logic."""
-        max_retries = 5  # Increased from 3
-        base_delay = 2   # Base delay in seconds
+        max_retries = 5
+        base_delay = 2
         
         for attempt in range(max_retries):
             try:
@@ -1229,15 +1242,17 @@ class BudgetProcessor:
                 if 'RATE_LIMIT_EXCEEDED' in str(e):
                     if attempt < max_retries - 1:
                         delay = base_delay * (2 ** attempt)  # Exponential backoff: 2s, 4s, 8s, 16s, 32s
-                        logger.info(f"Rate limit hit, waiting {delay}s before retry {attempt + 1}/{max_retries}")
+                        logger.warning(f"🚫 Rate limit exceeded for range {range_name}")
+                        logger.warning(f"⏳ Attempt {attempt + 1}/{max_retries}: Waiting {delay} seconds")
                         time.sleep(delay)
+                        logger.info(f"▶️ Resuming after {delay}s wait")
                         continue
                 raise
 
     def _get_range_values_batch(self, spreadsheet_id: str, ranges: List[str]) -> List[List]:
         """Fetch multiple ranges in a single batch request."""
-        max_retries = 5  # Increased from implicit 1
-        base_delay = 2   # Base delay in seconds
+        max_retries = 5
+        base_delay = 2
         
         for attempt in range(max_retries):
             try:
@@ -1246,7 +1261,6 @@ class BudgetProcessor:
                     ranges=ranges
                 ).execute()
                 
-                # Extract values from each range
                 values = []
                 for value_range in result.get('valueRanges', []):
                     values.append(value_range.get('values', []))
@@ -1256,9 +1270,12 @@ class BudgetProcessor:
             except Exception as e:
                 if 'RATE_LIMIT_EXCEEDED' in str(e):
                     if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt)  # Exponential backoff
-                        logger.info(f"Rate limit hit in batch request, waiting {delay}s before retry {attempt + 1}/{max_retries}")
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(f"🚫 Rate limit exceeded for batch request of {len(ranges)} ranges")
+                        logger.warning(f"⏳ Attempt {attempt + 1}/{max_retries}: Waiting {delay} seconds")
+                        logger.debug(f"Affected ranges: {ranges}")
                         time.sleep(delay)
+                        logger.info(f"▶️ Resuming after {delay}s wait")
                         continue
                 logger.error(f"Error in batch request: {str(e)}")
                 raise

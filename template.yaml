@@ -3,7 +3,7 @@ Transform: AWS::Serverless-2016-10-31
 Description: AWS SAM Template for Budget Sync Lambda function
 Globals:
   Function:
-    Timeout: 30
+    Timeout: 900
     Runtime: python3.9
     Handler: src.budget_sync.lambda_handler.lambda_handler
 Resources:
@@ -13,7 +13,7 @@ Resources:
       CodeUri: .
       Handler: src.budget_sync.lambda_handler.lambda_handler
       Description: Lambda handler for processing budgets
-      MemorySize: 128
+      MemorySize: 512
       Environment:
         Variables:
           GOOGLE_APPLICATION_CREDENTIALS: config/service-account-key.json

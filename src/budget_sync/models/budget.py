@@ -46,6 +46,22 @@ class BudgetLineItem:
             elif self.estimate_ot_hours and not self.estimate_ot_rate:
                 self.validation.messages.append("Has OT hours but missing OT rate")
 
+    def to_dict(self):
+        """Convert BudgetLineItem to a dictionary for JSON serialization."""
+        return {
+            'number': self.number,
+            'description': self.description,
+            'estimate_days': self.estimate_days,
+            'estimate_rate': self.estimate_rate,
+            'estimate_total': self.estimate_total,
+            'actual_days': self.actual_days,
+            'actual_rate': self.actual_rate,
+            'actual_total': self.actual_total,
+            'estimate_ot_rate': self.estimate_ot_rate,
+            'estimate_ot_hours': self.estimate_ot_hours,
+            'validation': self.validation.__dict__ if self.validation else None
+        }
+
     @property
     def has_actuals(self) -> bool:
         """Check if line item has any actual values."""
@@ -89,6 +105,24 @@ class BudgetClass:
             item.estimate_rate and not item.estimate_days
             for item in self.line_items
         )
+
+    def to_dict(self):
+        """Convert BudgetClass object to a dictionary for JSON serialization."""
+        return {
+            'class_code': self.class_code,
+            'class_name': self.class_name,
+            'estimate_subtotal': self.estimate_subtotal,
+            'estimate_pnw': self.estimate_pnw,
+            'estimate_total': self.estimate_total,
+            'actual_subtotal': self.actual_subtotal,
+            'actual_pnw': self.actual_pnw,
+            'actual_total': self.actual_total,
+            'line_items': [
+                item.to_dict() if hasattr(item, 'to_dict') else item 
+                for item in self.line_items
+            ],
+            'validation': self.validation.__dict__ if self.validation else None
+        }
 
 @dataclass
 class Budget:
